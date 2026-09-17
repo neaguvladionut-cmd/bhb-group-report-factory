@@ -1,13 +1,13 @@
 # Group Report Factory
 
-Instrument local, offline, pentru raportul de grup din Assessment Centre. Primește exporturile standard deja produse de ecosistemul legacy și descarcă două livrabile editabile: auditul XLSX și raportul PPTX în română.
+Instrument local, offline, pentru raportul de grup din Assessment Centre. Primește exporturile standard deja produse de ecosistemul legacy și produce un PDF fix pentru verificare/distribuire, un PPTX editabil și un audit XLSX.
 
 ## Operator
 
 1. Deschide `deploy/index.html` direct în browser sau rulează `npm run build`, apoi deschide fișierul rezultat.
 2. Pasul 1 — **Încarcă**: adaugă exportul AC de sinteză (scoruri 1–5) și, pentru comportamente, exportul AC detaliat (scoruri 0–2). Poți selecta fișierele împreună sau prin drag-and-drop.
 3. Pasul 2 — **Revizuiește**: parcurge cele șapte sub-etape, rezolvă blocajele și marchează avertismentele după ce le-ai revizuit. Zero observat rămâne zero; o celulă goală este avertisment, nu este transformată în zero. Participanții complet neevaluati rămân vizibili în audit, dar sunt excluși din calcule.
-4. Pasul 3 — **Generează**: alege rendererul **BHB** sau **TREND**, controlează secțiunile și livrarea într-un singur PPTX sau în două fișiere separate, apoi descarcă auditul XLSX și livrabilul/livrabilele PowerPoint.
+4. Pasul 3 — **Generează**: alege rendererul **BHB** sau **TREND**, controlează livrarea într-un singur PPTX sau în două fișiere separate, actualizează previzualizarea PDF și descarcă PDF-ul, auditul XLSX și livrabilul/livrabilele PowerPoint.
 
 ## Raportul generat
 
@@ -30,10 +30,10 @@ Validarea oprește livrabilul pentru antete necunoscute, nume/cod de evaluare li
 
 Auditul XLSX păstrează amprenta de sursă, schema detectată, avertismente/blocaje, includerea sau excluderea, rândurile normalizate, calculele, agregatele de comportamente, distribuția și versiunea de calcul. Totul rulează în memoria browserului: fără upload, API, bază de date, analytics, browser storage, acces/modificare legacy, automatizare de click sau mesagerie. Nu păstrează fișierele și nu cere reintroducerea rosterului.
 
-PDF-ul rămâne un pas local opțional din PowerPoint, nu o condiție de lucru. Pentru tabele sau grafice cu foarte multe competențe, operatorul poate ajusta dimensiunile și pozițiile direct în PPTX.
+PDF-first este contractul de verificare: PDF-ul este generat local, în format fix 16:9, din exact payload-ul și `reportPlan` curente. Canvas-ul PDF și butonul **Descarcă PDF** folosesc aceiași bytes; dacă PDF.js nu poate porni în browserul offline, interfața oferă deschiderea nativă a aceluiași Blob. PDF-ul combină raportul principal și anexa indiferent de alegerea PPTX. PPTX-ul rămâne editabil și se compilează numai la click; livrarea poate fi un singur fișier sau două fișiere. Pentru tabele sau grafice cu foarte multe competențe, operatorul poate ajusta dimensiunile și pozițiile direct în PPTX.
 
 ## Dezvoltare și recuperare
 
 `npm run verify` reconstruiește `deploy/` și rulează contractele sintetice, inclusiv verificarea părților native de chart/workbook PptxGenJS. Nu introduce date client în teste sau în repository. Dacă o selecție este greșită, selectează din nou fișierul cu același nume pentru a-l înlocui sau folosește „Șterge sesiunea”; nu există date persistente de curățat.
 
-Dependențele browser sunt livrate local în `src/assets/vendor/`: SheetJS, JSZip și PptxGenJS, cu licențele aferente. Nicio dependență nu este încărcată din rețea.
+Dependențele browser sunt livrate local în `src/assets/vendor/`: SheetJS, JSZip, PptxGenJS, pdf-lib și PDF.js, cu licențele aferente. Nicio dependență nu este încărcată din rețea. Nu sunt incluse fonturi proprietare sau date client.
