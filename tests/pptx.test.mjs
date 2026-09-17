@@ -75,10 +75,12 @@ test("PPTX uses PptxGenJS native chart and workbook parts",async()=>{
   const longFile=join(dir,"report-long-cover.pptx"); await downloadPptx(longPayload,longFile);
   const longCover=execFileSync("unzip",["-p",longFile,"ppt/slides/slide1.xml"],{encoding:"utf8"});
   assert((longCover.match(/<a:p>/gu)||[]).length>=6,"long cover title and metadata are explicitly wrapped into separate lines");
+  assert.match(longCover,/sz="1100"/u,"long cover metadata drops to the safe-zone font size");
   const shapeWithText=(xml,needle)=>{const at=xml.indexOf(`<a:t>${needle}`),start=xml.lastIndexOf("<p:sp>",at);return xml.slice(start,xml.indexOf("</p:sp>",at));};
   const titleShape=shapeWithText(longCover,"Proiect"),metadataShape=shapeWithText(longCover,"Client:");
   const emuBox=xml=>{const off=xml.match(/<a:off x="(\d+)" y="(\d+)"\/>/u),ext=xml.match(/<a:ext cx="(\d+)" cy="(\d+)"\/>/u);return{top:Number(off?.[2]||0),bottom:Number(off?.[2]||0)+Number(ext?.[2]||0)}};
   assert(emuBox(titleShape).bottom<=emuBox(metadataShape).top,"long cover title and metadata occupy non-overlapping vertical zones");
+  assert(emuBox(metadataShape).bottom<6254496,"long cover metadata remains above the footer rule safe zone");
   assert.match(longCover,/Client: Client cu o denumire suficient de/u);
   assert.match(longCover,/lungă pentru a testa zona de metadate/u);
   const dividerXml=files.filter(name=>/^ppt\/slides\/slide\d+\.xml$/u.test(name)).map(name=>execFileSync("unzip",["-p",file,name],{encoding:"utf8"}));assert.equal(dividerXml.length,27,"BHB whole output includes the new main-plus-appendix structure");assert(dividerXml.some(xml=>xml.includes("Executive Summary")),"BHB whole output includes Executive Summary");assert.equal(dividerXml.filter(xml=>xml.includes("Key Findings")).length,3,"BHB creates one Key Findings slide per competency");assert(dividerXml.some(xml=>xml.includes("CONFIDENȚIAL")),"BHB cover marks the report confidential");assert(dividerXml.some(xml=>xml.includes("Anexă")),"BHB whole output includes the appendix");
