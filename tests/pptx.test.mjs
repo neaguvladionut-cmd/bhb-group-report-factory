@@ -42,6 +42,7 @@ test("PPTX uses PptxGenJS native chart and workbook parts",async()=>{
     "pptx-behavior-background-asset":"bhb-behavior-background.png",
     "pptx-observer-photo-asset":"bhb-observer-photo.jpg",
     "pptx-logo-asset":"bhb-logo.svg",
+    "pptx-logo-white-asset":"bhb-logo-full-white.png",
     "pptx-symbol-asset":"bhb-symbol.svg",
     "pptx-report-illustration-asset":"bhb-competency-profiler-report-illustration.webp",
     "pptx-range-legend-asset":"bhb-range-legend-template.png"
@@ -70,7 +71,18 @@ test("PPTX uses PptxGenJS native chart and workbook parts",async()=>{
   assert.match(coverXml,/sz="5000"/u,"cover title uses the requested 50pt BHB title hierarchy");
   assert.match(coverXml,/sz="2400"/u,"cover subtitle/context uses the requested 24pt hierarchy");
   assert.equal((coverXml.match(/D210 Test/gu)||[]).length,1,"cover does not repeat the project name when the client title is present");
+  const longPayload=buildPayload(XLSX,[{name:"summary.xlsx",bytes:summary},{name:"detail.xlsx",bytes:detail}],{projectName:"Proiect de verificare a alinierii experienței utilizatorului pentru echipe distribuite",clientName:"Client cu o denumire suficient de lungă pentru a testa zona de metadate",reportDate:"30 septembrie 2026",context:"Atelier local de validare a raportului și a fluxului de livrare pentru conducere"});
+  const longFile=join(dir,"report-long-cover.pptx"); await downloadPptx(longPayload,longFile);
+  const longCover=execFileSync("unzip",["-p",longFile,"ppt/slides/slide1.xml"],{encoding:"utf8"});
+  assert((longCover.match(/<a:p>/gu)||[]).length>=6,"long cover title and metadata are explicitly wrapped into separate lines");
+  const shapeWithText=(xml,needle)=>{const at=xml.indexOf(`<a:t>${needle}`),start=xml.lastIndexOf("<p:sp>",at);return xml.slice(start,xml.indexOf("</p:sp>",at));};
+  const titleShape=shapeWithText(longCover,"Proiect"),metadataShape=shapeWithText(longCover,"Client:");
+  const emuBox=xml=>{const off=xml.match(/<a:off x="(\d+)" y="(\d+)"\/>/u),ext=xml.match(/<a:ext cx="(\d+)" cy="(\d+)"\/>/u);return{top:Number(off?.[2]||0),bottom:Number(off?.[2]||0)+Number(ext?.[2]||0)}};
+  assert(emuBox(titleShape).bottom<=emuBox(metadataShape).top,"long cover title and metadata occupy non-overlapping vertical zones");
+  assert.match(longCover,/Client: Client cu o denumire suficient de/u);
+  assert.match(longCover,/lungă pentru a testa zona de metadate/u);
   const dividerXml=files.filter(name=>/^ppt\/slides\/slide\d+\.xml$/u.test(name)).map(name=>execFileSync("unzip",["-p",file,name],{encoding:"utf8"}));assert.equal(dividerXml.length,27,"BHB whole output includes the new main-plus-appendix structure");assert(dividerXml.some(xml=>xml.includes("Executive Summary")),"BHB whole output includes Executive Summary");assert.equal(dividerXml.filter(xml=>xml.includes("Key Findings")).length,3,"BHB creates one Key Findings slide per competency");assert(dividerXml.some(xml=>xml.includes("CONFIDENȚIAL")),"BHB cover marks the report confidential");assert(dividerXml.some(xml=>xml.includes("Anexă")),"BHB whole output includes the appendix");
+  const behaviorSlides=dividerXml.filter(xml=>xml.includes("Comportamente cheie"));assert.equal(behaviorSlides.length,2,"BHB keeps one dark behavior slide per competency");behaviorSlides.forEach(xml=>{assert((xml.match(/<a:srgbClr val="FFFFFF"/gu)||[]).length>=7,"dark behavior slides use light text for headings, labels and body");assert.doesNotMatch(xml,/<a:t>Comportamentele sintetizează[\s\S]*?<a:srgbClr val="003057"/u,"dark behavior body is not navy on navy");});const behaviorDivider=dividerXml.find(xml=>xml.includes("Profil")&&xml.includes("comportamental"));assert(behaviorDivider,"behavior divider is present");assert((behaviorDivider.match(/<a:srgbClr val="FFFFFF"/gu)||[]).length>=2,"dark behavior divider uses light title and footer treatment");
   const media=files.filter(name=>/^ppt\/media\/.*\.png$/u.test(name));
   const mediaBytes=media.map(name=>execFileSync("unzip",["-p",file,name],{maxBuffer:20*1024*1024}));
   for(const name of ["bhb-report-background.png","bhb-section-gradient.png","bhb-observations-background.png","bhb-behavior-background.png","bhb-range-legend-template.png"]){const reference=await readFile(resolve(root,"src/assets/images",name));assert(mediaBytes.some(bytes=>bytes.equals(reference)),`${name} must be embedded as an authentic full-slide BHB asset`);}
