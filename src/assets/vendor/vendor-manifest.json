@@ -1,0 +1,19 @@
+{
+  "@pdf-lib/fontkit": {
+    "version": "1.1.1",
+    "license": "MIT",
+    "sourceArchiveSha512": "2a331dee0acd6a92164bf0e6d20bdf1c48a54b202678bbeb10655ca8b1a2d1561e6eeaaacd36e0176f5e7c2c7bb6fc7e2046c6df341c8914969771a4512be366",
+    "file": "fontkit.umd.min.js",
+    "sha256": "d8df561b9fba98e24f2e5130e40948809281bbbc55a20c412359f1a0a5eb35a6"
+  },
+  "Noto Sans": {
+    "copyright": "Copyright 2022 The Noto Project Authors",
+    "license": "SIL Open Font License 1.1",
+    "source": "LibreOffice bundled Noto Sans Latin/Greek/Cyrillic fonts",
+    "files": {
+      "NotoSans-Regular.ttf": "f5f552c8c5edb61fe6efb824baf4d4de47b1a8689ab4925ff43f7bd6a4ebece5",
+      "NotoSans-Bold.ttf": "3a08a47daa00cade516425c15c57615aef2fd418ec9811a7b9f465088f92cc05",
+      "noto-sans-data.js": "4e20a6e0270c4370bf96e3511216d2b44e4893fe83f8b5ffa4de1596cc23cea4"
+    }
+  }
+}

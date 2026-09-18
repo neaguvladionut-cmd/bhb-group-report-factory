@@ -5,7 +5,14 @@ const COLORS = {
   navy: "003057", ink: "14233b", aqua: "1aa6a8", green: "4a8c61", blue: "0a375b",
   pale: "eef7f7", line: "cbd9df", white: "ffffff", muted: "526579", dark: "082c4b"
 };
-const safeText = value => String(value ?? "").replace(/[\u0000-\u001f<>]/gu, " ").replace(/[ăâîșţțĂÂÎȘŢȚ]/gu, character => ({ă:"a",â:"a",î:"i",ș:"s",ţ:"t",ț:"t",Ă:"A",Â:"A",Î:"I",Ș:"S",Ţ:"T",Ț:"T"}[character] || character)).replace(/\s+/gu, " ").trim();
+const safeText = value => String(value ?? "").replace(/[\u0000-\u001f<>]/gu, " ").replace(/\s+/gu, " ").trim();
+function decodeFontData(value) {
+  if (value instanceof Uint8Array) return value;
+  if (typeof value !== "string" || typeof atob !== "function") throw new Error("Datele fontului Noto Sans nu sunt disponibile");
+  const binary = atob(value), bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
 const asNumber = value => Number.isFinite(Number(value)) ? Number(value) : 0;
 const hex = (value, rgb) => { const code = String(value || "000000").replace("#", "").padEnd(6, "0"); return rgb(parseInt(code.slice(0, 2), 16) / 255, parseInt(code.slice(2, 4), 16) / 255, parseInt(code.slice(4, 6), 16) / 255); };
 
@@ -151,9 +158,12 @@ function drawPageBody(page, pdf, fonts, slide, payload, renderer) {
 export async function createPdf(payload, { scope = "whole", renderer = payload?.metadata?.renderer || "bhb" } = {}) {
   const lib = globalThis.PDFLib;
   if (!lib?.PDFDocument) throw new Error("Biblioteca PDF locală nu este disponibilă");
-  const { PDFDocument, StandardFonts, rgb } = lib;
+  const fontkit = globalThis.fontkit, fontData = globalThis.__grfFontData;
+  if (!fontkit?.create || !fontData?.regular || !fontData?.bold) throw new Error("Fonturile Noto Sans pentru diacritice nu sunt disponibile");
+  const { PDFDocument, rgb } = lib;
   const pdf = await PDFDocument.create();
-  const fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold), white: hex(COLORS.white, rgb), navy: hex(COLORS.navy, rgb), ink: hex(COLORS.ink, rgb), aqua: hex(COLORS.aqua, rgb), blue: hex(COLORS.blue, rgb), green: hex(COLORS.green, rgb), line: hex(COLORS.line, rgb), muted: hex(COLORS.muted, rgb), dark: hex(COLORS.dark, rgb) };
+  pdf.registerFontkit(fontkit);
+  const fonts = { regular: await pdf.embedFont(decodeFontData(fontData.regular), { subset: true }), bold: await pdf.embedFont(decodeFontData(fontData.bold), { subset: true }), white: hex(COLORS.white, rgb), navy: hex(COLORS.navy, rgb), ink: hex(COLORS.ink, rgb), aqua: hex(COLORS.aqua, rgb), blue: hex(COLORS.blue, rgb), green: hex(COLORS.green, rgb), line: hex(COLORS.line, rgb), muted: hex(COLORS.muted, rgb), dark: hex(COLORS.dark, rgb) };
   const plan = reportPlan(payload, { scope });
   for (const slide of plan) { const page = pdf.addPage(); page.setSize(PAGE.width, PAGE.height); await paintBackground(page, pdf, rgb, renderer, slide.family); drawPageBody(page, pdf, fonts, slide, payload, renderer); if (!['cover', 'divider', 'appendix-divider', 'behavior'].includes(slide.family)) drawFooter(page, fonts, slide); }
   return pdf.save({ useObjectStreams: false });
