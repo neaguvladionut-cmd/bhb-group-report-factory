@@ -1,0 +1,33 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # No dependencies to install. No browser test.
+      - name: Build
+        run: npm run build
+      - name: Test (required; every test file except pptx.test.mjs)
+        run: npm run test:required
+      # Allowed to fail (Vlad, 2026-09-24): pptx.test.mjs imports from a Mac-only path; see bhb-platform issue #31
+      - name: "Test pptx (allowed to fail until #31)"
+        continue-on-error: true
+        run: npm run test:pptx
+      - name: Fresh build equals committed deploy/
+        if: ${{ !cancelled() }}
+        run: git diff --exit-code -- deploy && test -z "$(git status --porcelain -- deploy)"
+      - name: Served root equals deploy/
+        if: ${{ !cancelled() }}
+        run: npm run check:root
