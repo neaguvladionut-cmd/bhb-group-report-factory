@@ -113,7 +113,11 @@ in `src/` or `deploy/`.
 
 ## 3. Privacy review
 
-Nothing was removed. The dispositions below are proposals for the Architect or Vlad.
+Nothing was removed. The dispositions below were proposals for the Architect or Vlad.
+
+**Ruled by Vlad, 2026-09-24:** every image and slide in this table, including the photo, the Trend
+template slides and the example content on slides 5, 7, 8, 12 and 21, comes from the BHB/Trend library
+and is cleared for use and public hosting. **All rows: keep.** Recorded by the Architect.
 
 | Asset | What it shows | Origin | Risk | Proposed disposition |
 |---|---|---|---|---|
@@ -167,4 +171,4 @@ Nothing was removed. The dispositions below are proposals for the Architect or V
 5. The hostile-text expectation in `tests/pdf.test.mjs` (`/script` vs `script`) fails wherever
    `pdftotext` is installed.
 6. The diacritics test needs Node 25 or later. This belongs in #31 or the README.
-7. The privacy dispositions in §3 need Vlad's decision.
+7. ~~The privacy dispositions in §3 need Vlad's decision.~~ Resolved: Vlad cleared all assets, 2026-09-24 (see §3).
