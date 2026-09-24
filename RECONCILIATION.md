@@ -1,6 +1,6 @@
 # Group Report Factory reconciliation gate
 
-Status: RESOLVED — pending Inspector
+Status: RESOLVED — Inspector passed 2026-09-24 (bhb-platform RECON-grf-prealpha.md §5–5a). This branch continues as the working branch of rehome #32; the branch gate below now reads as the #32 gate: no merge to `main` before Vlad's click-through (#25), the Charter principles 7–10 pass and the pptx reconciliation.
 
 ## First task
 
