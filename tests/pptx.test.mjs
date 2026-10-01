@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { buildPayload, createEvaluationSheetTemplate } from "../src/rebuild-core.js";
 import { HOW_TO_READ, reportPlan } from "../src/rebuild-report-plan.js";
-import { FIXED_TEMPLATE_LABELS, buildBundleArtifacts, fillFixedTemplateLabels, generateTrendPptx, selfCheckPptx } from "../src/template-pptx.js";
+import { FIXED_TEMPLATE_LABELS, buildBundleArtifacts, generateTrendPptx, selfCheckPptx } from "../src/template-pptx.js";
 
 const run = promisify(execFile);
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -64,9 +64,12 @@ test("clean-template declares the public-package scrub and local-only source bou
   assert.match(script, /git-ignored/iu);
 });
 
-test("Trend generator re-inserts every fixed template label into generated slide XML", () => {
-  const generated = fillFixedTemplateLabels("<p:sld><p:spTree></p:spTree></p:sld>", FIXED_TEMPLATE_LABELS);
-  for (const label of FIXED_TEMPLATE_LABELS) assert.match(generated, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+test("cleaned asset v2 keeps Trend's fixed wording across its slides", async () => {
+  const zip = await JSZip.loadAsync(await readFile(asset));
+  const text = [];
+  for (const name of Object.keys(zip.files).filter((entry) => /^ppt\/slides\/slide\d+\.xml$/u.test(entry))) text.push(...slideText(await zip.file(name).async("string")));
+  const joined = text.join("").replace(/\s+/gu, " ");
+  for (const label of FIXED_TEMPLATE_LABELS) assert.match(joined, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"), label);
 });
 
 test("generated Trend deck has one cloned output slide per plan item across configurations", async () => {
@@ -78,10 +81,9 @@ test("generated Trend deck has one cloned output slide per plan item across conf
     assert.equal(slideNames.length, plan.length);
     for (const [index, item] of plan.entries()) {
       const xml = await generated.zip.file(slideNames[index]).async("string");
-      const titleShape = xml.match(/name="GRF-R role:title"[\s\S]*?<a:t>([\s\S]*?)<\/a:t>/u);
-      assert(titleShape, `slide ${index + 1} has no generated title role`);
-      assert.equal(decode(titleShape[1]), item.title);
-      assert.match(xml, /name="GRF-R role:body"/u, `slide ${index + 1} has no generated body role`);
+      const text = slideText(xml).join("").replace(/\s+/gu, " ");
+      if (!["appendix-divider", "how-to-read", "methodology"].includes(item.family)) assert(text.includes(item.title.replace(/\s+/gu, " ")), `slide ${index + 1} does not carry its title ${item.title}`);
+      assert.doesNotMatch(xml, /GRF-R role:/u);
     }
     await selfCheckPptx(generated.zip);
   }
@@ -92,13 +94,12 @@ test("generated group slides and charts use NORD/SUD participant-only values", a
   const plan = reportPlan(payload);
   const generated = await generatedDeck(payload);
   for (const [group, expected] of [["NORD", "4.00"], ["SUD", "2.00"]]) {
-    const groupItems = plan.filter((item) => item.groupKey === group && ["range", "ranking", "competency-distribution"].includes(item.family));
-    assert(groupItems.length);
-    for (const item of groupItems) {
-      const index = plan.indexOf(item);
-      const xml = await generated.zip.file(`ppt/slides/slide${index + 1}.xml`).async("string");
-      assert.match(xml, new RegExp(`${group}[\\s\\S]*Leadership: ${expected}`, "u"));
-    }
+    const groupItems = plan.filter((item) => item.groupKey === group && item.family === "benchmark");
+    assert.equal(groupItems.length, 1);
+    const index = plan.indexOf(groupItems[0]);
+    const xml = await generated.zip.file(`ppt/slides/slide${index + 1}.xml`).async("string");
+    assert.match(slideText(xml).join("|"), new RegExp(`Leadership\t${expected}`, "u"));
+    assert.match(slideText(xml).join("|"), new RegExp(` · ${group}`, "u"));
   }
   for (const slide of Object.keys(generated.zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))) {
     const rels = await generated.zip.file(slide.replace("ppt/slides/", "ppt/slides/_rels/") + ".rels").async("string");

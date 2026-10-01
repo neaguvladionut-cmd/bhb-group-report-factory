@@ -12,7 +12,7 @@ const text = (value) => String(value ?? "").trim();
 function metadata() {
   const groupNames = Object.fromEntries($$(`[data-group-name]`).map((input) => [input.dataset.groupName, input.value]));
   const slideToggles = Object.fromEntries($$(`[data-slide-toggle]`).map((input) => [input.dataset.slideToggle, input.checked]));
-  return { projectName: $("#project-name")?.value || "", clientName: $("#client-name")?.value || "", reportDate: $("#report-date")?.value || "", context: $("#report-context")?.value || "", exercises: $("#exercise-list")?.value || "", otherInstruments: $("#other-instruments")?.value || "", conclusions: $("#conclusions")?.value || "", benchmarkLow: $("#benchmark-low")?.value ?? "2.75", benchmarkHigh: $("#benchmark-high")?.value ?? "3.5", annex: $("#annex-setting")?.value || "end", splitGroups: Boolean($("#split-groups")?.checked), groupNames, slideToggles };
+  return { projectName: $("#project-name")?.value || "", clientName: $("#client-name")?.value || "", reportDate: $("#report-date")?.value || "", context: $("#report-context")?.value || "", exercises: $("#exercise-list")?.value || "", otherInstruments: $("#other-instruments")?.value || "", conclusions: $("#conclusions")?.value || "", executiveConclusions: $("#conclusions")?.value || "", program: $("#program")?.value || "", evaluators: $("#evaluators")?.value || "", days: $("#days")?.value || "", exerciseCount: $("#exercise-count")?.value || "", conclusionsStrengths: $("#conclusions-strengths")?.value || "", conclusionsDevelopment: $("#conclusions-development")?.value || "", conclusionsInterventions: $("#conclusions-interventions")?.value || "", benchmarkLow: $("#benchmark-low")?.value ?? "2.75", benchmarkHigh: $("#benchmark-high")?.value ?? "3.5", annex: $("#annex-setting")?.value || "end", splitGroups: Boolean($("#split-groups")?.checked), groupNames, slideToggles };
 }
 
 function download(blob, name) {
@@ -124,7 +124,7 @@ async function createDownload(kind) {
 }
 
 $("#sources")?.addEventListener("change", readSources);
-["#project-name", "#client-name", "#report-date", "#report-context", "#exercise-list", "#other-instruments", "#conclusions", "#benchmark-low", "#benchmark-high", "#annex-setting", "#split-groups"].forEach((selector) => $(selector)?.addEventListener("input", invalidate));
+["#project-name", "#client-name", "#report-date", "#report-context", "#program", "#evaluators", "#days", "#exercise-count", "#exercise-list", "#other-instruments", "#conclusions", "#conclusions-strengths", "#conclusions-development", "#conclusions-interventions", "#benchmark-low", "#benchmark-high", "#annex-setting", "#split-groups"].forEach((selector) => $(selector)?.addEventListener("input", invalidate));
 $$(`[data-slide-toggle]`).forEach((input) => input.addEventListener("change", invalidate));
 $("#to-step-2")?.addEventListener("click", () => { state.step = 2; render(); });
 $("#to-step-3")?.addEventListener("click", () => { state.step = 3; render(); });

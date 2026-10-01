@@ -1,0 +1,234 @@
+// BP-GRF-R fill map (binding): assertions on the GENERATED files, not on the code that makes them.
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import test from "node:test";
+import { buildPayload } from "../src/rebuild-core.js";
+import { BUNDLE_FAMILIES, f2, participantsPerSlide, reportPlan, splitEqual } from "../src/rebuild-report-plan.js";
+import { buildBundleArtifacts, generateTrendPptx } from "../src/template-pptx.js";
+import { getShape, shapeText, tableRows, visualBox, xfrmOf, NEW_SHAPE_PREFIX } from "../src/trend-fill.js";
+import { createFixture as acceptanceFixture } from "./fixtures/grf-r-acceptance-fixture.mjs";
+import { createFixture as variedFixture, participants as variedParticipants } from "./fixtures/grf-r-varied-fixture.mjs";
+
+const root = resolve(new URL("..", import.meta.url).pathname);
+const asset = resolve(root, "src/assets/trend/template-raport-de-grup-RO.pptx");
+const loadUmd = async (path) => { const module = { exports: {} }; new Function("module", "exports", "require", await readFile(path, "utf8"))(module, module.exports, undefined); return module.exports; };
+const XLSX = await loadUmd(resolve(root, "src/assets/vendor/xlsx.full.min.js"));
+const JSZip = await loadUmd(resolve(root, "src/assets/vendor/jszip.min.js"));
+const opentype = await loadUmd(resolve(root, "src/assets/vendor/opentype.min.js"));
+globalThis.window = { JSZip, XLSX, opentype, __GRF_TEMPLATE_BASE64__: (await readFile(asset)).toString("base64"), __GRF_FONT_BASE64__: (await readFile(resolve(root, "src/assets/vendor/Poppins-Regular.ttf"))).toString("base64") };
+const decode = (value) => String(value).replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&quot;/gu, "\"").replace(/&apos;/gu, "'");
+const text = (shapeXml) => decode(shapeText(shapeXml));
+const EMU = 914400;
+
+const payloadOf = (fixture, metadata = {}) => buildPayload(XLSX, [{ name: "summary.xlsx", bytes: fixture.summary }, { name: "detail.xlsx", bytes: fixture.detailed }, { name: "evaluation-sheet-template.csv", bytes: fixture.csv }], { ...fixture.metadata, reportDate: "2026-10-01", ...metadata }, {}, { acknowledgedWarningIds: [] });
+const acceptance = acceptanceFixture(XLSX); const varied = variedFixture(XLSX);
+const template = await JSZip.loadAsync(await readFile(asset));
+const templateSlides = new Map(); for (let index = 1; index <= 22; index += 1) templateSlides.set(index, await template.file(`ppt/slides/slide${index}.xml`).async("string"));
+const shapeIds = (xml) => [...xml.matchAll(/<p:cNvPr\b[^>]*\bid="(\d+)"[^>]*\bname="([^"]*)"/gu)].map((match) => ({ id: match[1], name: decode(match[2]) }));
+const relationships = (xml) => [...xml.matchAll(/<Relationship\b([^>]*)\/>/gu)].map((match) => Object.fromEntries([...match[1].matchAll(/(Id|Type|Target)="([^"]*)"/gu)].map((part) => [part[1], part[2]])));
+const resolveTarget = (source, target) => { const parts = `${source.split("/").slice(0, -1).join("/")}/${target}`.split("/"); const output = []; for (const part of parts) { if (part === "..") output.pop(); else if (part && part !== ".") output.push(part); } return output.join("/"); };
+
+async function deck(payload, scope = "whole") {
+  const zip = await JSZip.loadAsync(Buffer.from(await (await generateTrendPptx(payload, { scope })).arrayBuffer()));
+  const plan = reportPlan(payload, { scope });
+  const slides = []; for (let index = 1; index <= plan.length; index += 1) slides.push(await zip.file(`ppt/slides/slide${index}.xml`).async("string"));
+  const chartsOf = async (index) => { const rels = relationships(await zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`).async("string")); const output = []; for (const rel of rels.filter((entry) => entry.Type.endsWith("/chart"))) { const path = resolveTarget(`ppt/slides/slide${index + 1}.xml`, rel.Target); const chart = await zip.file(path).async("string"); const chartRels = relationships(await zip.file(path.replace("charts/", "charts/_rels/") + ".rels").async("string")); const book = XLSX.read(await zip.file(resolveTarget(path, chartRels.find((entry) => entry.Type.endsWith("/package")).Target)).async("array"), { type: "array" }); output.push({ path, chart, book }); } return output; };
+  return { zip, plan, slides, chartsOf };
+}
+const whole = await deck(payloadOf(acceptance, { splitGroups: false, annex: "end" }));
+const split = await deck(payloadOf(acceptance, { splitGroups: true, annex: "end" }));
+const variedDeck = await deck(payloadOf(varied, { splitGroups: true, annex: "end" }));
+
+test("rule 1: every generated slide holds only its template slide's shapes plus the map's New shapes", () => {
+  const allowedNew = { cover: 1, "key-findings": 1, "executive-summary": 9 };
+  for (const generated of [whole, split, variedDeck]) {
+    generated.plan.forEach((item, index) => {
+      const templateIds = new Set(shapeIds(templateSlides.get(item.templateIndex)).map((shape) => shape.id));
+      const shapes = shapeIds(generated.slides[index]);
+      const extra = shapes.filter((shape) => !templateIds.has(shape.id));
+      assert(extra.every((shape) => shape.name.startsWith(NEW_SHAPE_PREFIX)), `slide ${index + 1} (${item.family}) has an undeclared shape: ${extra.map((shape) => shape.name).join(", ")}`);
+      assert.equal(extra.length, allowedNew[item.family] || 0, `slide ${index + 1} (${item.family}) New-shape count`);
+      for (const id of templateIds) assert(shapes.some((shape) => shape.id === id), `slide ${index + 1} lost template shape ${id}`);
+    });
+  }
+});
+
+test("report order follows map §1: no duplicate key findings, t11 only as the annex divider, closing last", () => {
+  const payload = payloadOf(acceptance, { splitGroups: true });
+  const families = split.plan.map((item) => item.family);
+  assert.deepEqual(families.slice(0, 4), ["cover", "how-to-read", "methodology", "executive-summary"]);
+  assert.equal(split.plan.filter((item) => item.family === "key-findings").length, payload.competencies.length);
+  assert.equal(split.plan.filter((item) => item.templateIndex === 12).length, payload.competencies.length);
+  assert(!families.includes("observation"));
+  assert.deepEqual(split.plan.filter((item) => item.templateIndex === 11).map((item) => item.family), ["appendix-divider"]);
+  assert.equal(families.at(-1), "close");
+  assert.deepEqual(split.slides.filter((xml) => /Constatări cheie|Observații ·/u.test(xml)), []);
+  const groupStart = split.plan.findIndex((item) => item.groupKey);
+  assert(split.plan.slice(0, groupStart).every((item) => !item.groupKey));
+  assert(split.plan.filter((item) => item.groupKey).every((item) => ["divider-results", "range", "ranking", "benchmark", "population", "zone", "divider-behaviors", "behavior", "divider-conclusions", "conclusions"].includes(item.family)));
+});
+
+test("M1–M4: cover, how-to-read, methodology and executive summary fill their named shapes", () => {
+  const [cover, howTo, method, summary] = whole.slides;
+  assert.equal(text(getShape(cover, 15)), "Client sintetic cu etichete românești lungi – Centru de Dezvoltare");
+  assert.match(text(getShape(cover, 23)), /^2026 © www\.trendconsult\.eu/u);
+  assert.equal(text(getShape(cover, 12)), "Raport de grup");
+  assert.match(cover, /GRF-R new:confidential[\s\S]*?CONFIDENȚIAL/u);
+  assert(xfrmOf(cover.slice(cover.indexOf("GRF-R new:confidential") - 200)).y > xfrmOf(getShape(cover, 20)).y + xfrmOf(getShape(cover, 20)).cy);
+  assert.equal(text(getShape(howTo, 93)), "CUM CITIM ACEST RAPORT");
+  assert.equal(text(getShape(howTo, 5)).split("\n").length, 2);
+  assert.equal(text(getShape(howTo, 6)).split("\n").length, 2);
+  assert.match(text(getShape(howTo, 6)), /Rezultatele individuale se regăsesc în anexă\.$/u);
+  assert.match(text(getShape(method, 93)), /METODOLOGIE/u);
+  assert.match(text(getShape(method, 5)), /^20 participanți Client sintetic/u);
+  assert.match(text(getShape(method, 6)), /scală de la 1 la 5/u);
+  for (const slide of [howTo, method]) assert.doesNotMatch(slide, /\(0, 1|0–1–2|0-1-2|\(0-2\)/u);
+  assert.equal(text(getShape(summary, 5)), "Executive Summary");
+  assert.equal(text(getShape(summary, 8)), "Imaginea de ansamblu");
+  assert.match(text(getShape(summary, 4)), /^Evaluarea celor 20 participanți: \d+% dintre participanți/u);
+  assert.equal(text(getShape(summary, 9)), "Competențe");
+  assert.match(text(getShape(summary, 7)), /^Cel mai bine reprezentată: .+ \(\d\.\d\d\)\nPrincipala oportunitate: .+ \(\d\.\d\d\)$/u);
+  assert.equal(text(getShape(summary, 10)), "Concluzii comportamentale");
+  const box = xfrmOf(getShape(summary, 4));
+  for (const shape of summary.match(/<p:sp>(?:(?!<\/p:sp>)[\s\S])*?GRF-R new:infographic[\s\S]*?<\/p:sp>/gu)) { const at = xfrmOf(shape); assert(at.x >= box.x && at.x + at.cx <= box.x + box.cx + 1 && at.y >= box.y && at.y + at.cy <= box.y + box.cy + 1, "infographic inside id 4's box"); }
+});
+
+test("M5 key findings: table rows per scored participant, braces span their bands, R5 lists with shares", () => {
+  const payload = payloadOf(acceptance);
+  for (const [index, item] of whole.plan.entries()) {
+    if (item.family !== "key-findings") continue;
+    const xml = whole.slides[index];
+    assert.equal(text(getShape(xml, 21)), `Distribuția pe competențe – ${item.competency}`);
+    const frame = getShape(xml, 6); const rows = tableRows(frame); const box = xfrmOf(frame);
+    assert.equal(rows.length, payload.records.filter((record) => Number.isFinite(record.scores[item.competency])).length);
+    const values = rows.map((row) => decode([...row.matchAll(/<a:t>([^<]*)<\/a:t>/gu)].map((match) => match[1]).join("")));
+    assert.deepEqual(values, item.scores.map(f2));
+    let y = box.y; const spans = {};
+    rows.forEach((row, rowIndex) => { const h = Number(row.match(/\bh="(\d+)"/u)[1]); const value = item.scores[rowIndex]; const key = value > item.high ? "above" : value < item.low ? "below" : "in"; spans[key] = spans[key] ? { ...spans[key], bottom: y + h } : { top: y, bottom: y + h }; y += h; });
+    for (const [key, braceId, labelId] of [["above", 8, 11], ["in", 14, 16], ["below", 12, 13]]) {
+      const brace = getShape(xml, braceId);
+      if (!spans[key]) { assert.match(brace, /hidden="1"/u); continue; }
+      const at = xfrmOf(brace); assert(Math.abs(at.y - spans[key].top) < 2 && Math.abs(at.y + at.cy - spans[key].bottom) < 2, `brace ${braceId} spans its band`);
+      assert.equal(text(getShape(xml, labelId)), String(item.counts[key]));
+    }
+    assert.equal(text(getShape(xml, 19)), "Abilități cheie – Puncte forte");
+    assert.equal(text(getShape(xml, 20)), "Arii de dezvoltare");
+    const strengths = text(getShape(xml, 17)).split("\n").filter(Boolean); assert.equal(strengths.length, item.insight.key.length);
+    strengths.forEach((line) => assert.match(line, / \(\d+ %\)$/u));
+    assert.match(xml, new RegExp(`GRF-R new:subtitle[\\s\\S]*?medie ${f2(item.mean)} · mediană ${f2(item.median)}`, "u"));
+  }
+});
+
+test("M7–M15 and annex charts are native clones with cache = workbook = <c:f>, bands on a fixed 1–5 axis", async () => {
+  for (const generated of [split, variedDeck]) {
+    for (const [index, item] of generated.plan.entries()) {
+      const charts = await generated.chartsOf(index);
+      if (["range", "ranking", "population", "zone", "participant-mean", "participant-comparison", "competency-participants"].includes(item.family)) assert.equal(charts.length, 1, `slide ${index + 1} ${item.family} keeps its native chart`);
+      for (const { chart, book } of charts) {
+        assert.deepEqual(book.SheetNames, ["Sheet1"]);
+        const rows = XLSX.utils.sheet_to_json(book.Sheets.Sheet1, { header: 1, defval: null });
+        const series = chart.match(/<c:ser>[\s\S]*?<\/c:ser>/gu);
+        series.forEach((body, seriesIndex) => {
+          const column = String.fromCharCode(66 + seriesIndex);
+          assert.match(body, new RegExp(`<c:tx><c:strRef><c:f>Sheet1!\\$${column}\\$1</c:f>`, "u"));
+          assert.match(body, new RegExp(`<c:val><c:numRef><c:f>Sheet1!\\$${column}\\$2:\\$${column}\\$${rows.length}</c:f>`, "u"));
+          assert.equal(decode(body.match(/<c:tx>[\s\S]*?<c:v>([^<]*)<\/c:v>/u)[1]), rows[0][seriesIndex + 1]);
+          const categories = [...body.match(/<c:cat>[\s\S]*?<\/c:cat>/u)[0].matchAll(/<c:v>([^<]*)<\/c:v>/gu)].map((match) => decode(match[1]));
+          assert.deepEqual(categories, rows.slice(1).map((row) => String(row[0])));
+          const cached = new Map([...body.match(/<c:val>[\s\S]*?<\/c:val>/u)[0].matchAll(/<c:pt idx="(\d+)"><c:v>([^<]*)<\/c:v>/gu)].map((match) => [Number(match[1]), Number(match[2])]));
+          rows.slice(1).forEach((row, rowIndex) => assert.equal(cached.get(rowIndex) ?? null, row[seriesIndex + 1]));
+        });
+        assert.doesNotMatch(chart, /<c:v>(?:undefined|null|NaN)<\/c:v>|Maximizarea|<c:v>C1<\/c:v>|<c:v>Cluj<|<c:v>Iasi</u);
+        if (item.family !== "population") assert.match(chart, /<c:valAx>[\s\S]*?<c:scaling><c:orientation val="minMax"\/><c:max val="5"\/><c:min val="1"\/><\/c:scaling>/u);
+      }
+    }
+  }
+});
+
+test("rule 4: bands move with an edited benchmark (t13 band maps 1–5 from the template rectangle)", async () => {
+  const edited = await deck(payloadOf(acceptance, { benchmarkLow: "3", benchmarkHigh: "4" }));
+  const index = edited.plan.findIndex((item) => item.family === "competency-participants");
+  const original = visualBox(getShape(templateSlides.get(13), 3)); const moved = visualBox(getShape(edited.slides[index], 3));
+  const perPoint = original.cy / 0.75;
+  assert(Math.abs(moved.cy - perPoint) < 2); assert(Math.abs(moved.y - (original.y - 0.5 * perPoint)) < 2, JSON.stringify({ original, moved, perPoint }));
+  const benchmark = edited.slides[edited.plan.findIndex((item) => item.family === "benchmark")];
+  assert.equal(text(getShape(benchmark, 19)), "Rezultate raportate la benchmark (3.00-4.00)");
+  const range = edited.slides[edited.plan.findIndex((item) => item.family === "range")];
+  assert.match(text(getShape(range, 26)), /între 3\.00 și 4\.00/u);
+  for (const xml of edited.slides) assert.doesNotMatch(text(xml.replace(/<p:sp>(?:(?!<\/p:sp>)[\s\S])*?hidden="1"[\s\S]*?<\/p:sp>/gu, "")), /2\.75/u);
+});
+
+test("rules 5/6/9: tables resize by rows, braces follow rows, group suffix on titles and dividers", () => {
+  for (const [index, item] of split.plan.entries()) {
+    const xml = split.slides[index];
+    if (item.family === "benchmark") { const rows = tableRows(getShape(xml, 2)); assert.equal(rows.length, item.table.rows.length); const ids = rows.map((row) => row.match(/rowId[^>]*val="(\d+)"/u)?.[1]); assert.equal(new Set(ids).size, ids.length); }
+    if (item.family === "behavior") assert.equal(tableRows(getShape(xml, 7)).length, 1 + Math.max(item.key.length, item.development.length));
+    if (item.groupKey) assert(decode(xml).includes(` · ${item.groupLabel}`), `slide ${index + 1} lacks the group suffix`);
+    const frame = item.family === "benchmark" ? getShape(xml, 2) : item.family === "key-findings" ? getShape(xml, 6) : null;
+    if (frame) { const total = tableRows(frame).reduce((sum, row) => sum + Number(row.match(/\bh="(\d+)"/u)[1]), 0); assert.equal(xfrmOf(frame).cy, total); assert(total <= 10.0 * EMU + 2); }
+  }
+});
+
+test("rule 10 / A2–A4: annex charts are real charts, participants split equally and readably", () => {
+  assert.deepEqual(splitEqual(Array.from({ length: 21 }, (_, index) => index), 20).map((page) => page.length), [11, 10]);
+  assert.deepEqual(splitEqual(Array.from({ length: 23 }, (_, index) => index), 5).map((page) => page.length), [5, 5, 5, 4, 4]);
+  assert.equal(participantsPerSlide("participant-comparison", { seriesCount: 6 }), 5);
+  const plan = variedDeck.plan;
+  const pages = (family, competency) => plan.filter((item) => item.family === family && (!competency || item.competency === competency)).map((item) => item.rows.length);
+  assert.deepEqual(pages("participant-mean"), [23]);
+  assert.deepEqual(pages("participant-comparison"), [5, 5, 5, 4, 4]);
+  for (const name of plan.filter((item) => item.family === "competency-participants").map((item) => item.competency)) assert.deepEqual(pages("competency-participants", name), [12, 11]);
+  const sixth = plan.findIndex((item) => item.family === "competency-participants" && item.competencyIndex === 5);
+  assert.equal(plan[sixth].templateIndex, 13);
+  assert.equal(variedParticipants.length, 23);
+  assert.match(variedDeck.slides[sixth], /<p:graphicFrame>/u);
+});
+
+test("sixth competency colour FF9D75 on the A4 clone, the M8 series and the zone points", async () => {
+  const sixth = variedDeck.plan.findIndex((item) => item.family === "competency-participants" && item.competencyIndex === 5);
+  const [{ chart }] = await variedDeck.chartsOf(sixth);
+  assert.match(chart.match(/<c:ser>[\s\S]*?<\/c:ser>/u)[0], /FF9D75/u);
+  assert.doesNotMatch(chart.match(/<c:ser>[\s\S]*?<\/c:ser>/u)[0], /003057/u);
+  const [{ chart: ranking }] = await variedDeck.chartsOf(variedDeck.plan.findIndex((item) => item.family === "ranking"));
+  assert.equal(ranking.match(/<c:ser>/gu).length, 6); assert.match(ranking.match(/<c:ser>[\s\S]*?<\/c:ser>/gu)[5], /FF9D75/u);
+  const [{ chart: zone }] = await variedDeck.chartsOf(variedDeck.plan.findIndex((item) => item.family === "zone"));
+  assert.equal(zone.match(/<c:ser>/gu).length, 4); assert.match(zone, /<c:dPt><c:idx val="5"\/>[\s\S]*?FF9D75/u);
+});
+
+test("no undefined/null/NaN or template example data in any generated slide", () => {
+  for (const generated of [whole, split, variedDeck]) for (const xml of generated.slides) {
+    const content = decode([...xml.matchAll(/<a:t>([^<]*)<\/a:t>/gu)].map((match) => match[1]).join(" "));
+    assert.doesNotMatch(content, /undefined|\bnull\b|NaN|People Management|Colaborare și asertivitate|Gestionarea schimbării|Workshop de Change|2024|\(0, 1/u);
+  }
+});
+
+test("separate annex file: cover with „Anexă”, A1–A4, closing", async () => {
+  const annex = await deck(payloadOf(acceptance, { annex: "separate" }), "appendix");
+  assert.equal(annex.plan[0].family, "cover"); assert.match(text(getShape(annex.slides[0], 12)), /Raport de grup – Anexă/u);
+  assert.equal(annex.plan.at(-1).family, "close");
+  assert(annex.plan.slice(1, -1).every((item) => item.deliverable === "appendix"));
+  const main = await deck(payloadOf(acceptance, { annex: "separate" }), "main");
+  assert(!main.plan.some((item) => item.deliverable === "appendix"));
+  assert.match(text(getShape(main.slides[1], 6)), /în anexa transmisă separat\.$/u);
+});
+
+test("bundle (F15): one cropped item per chart and table, values equal to the deck", async () => {
+  const payload = payloadOf(acceptance, { splitGroups: true });
+  const artifacts = await buildBundleArtifacts(XLSX, payload);
+  const items = split.plan.filter((item) => BUNDLE_FAMILIES.has(item.family));
+  assert.equal(artifacts.manifest.items.length, items.length);
+  const pdf = new TextDecoder("latin1").decode(artifacts.pdfBytes);
+  const boxes = [...pdf.matchAll(/\/MediaBox \[0 0 (\d+) (\d+)\]/gu)].map((match) => [Number(match[1]), Number(match[2])]);
+  for (const [index, entry] of artifacts.manifest.items.entries()) {
+    const svg = artifacts.svg[index].content;
+    assert.match(svg, new RegExp(`width="${entry.width}" height="${entry.height}"`, "u"));
+    assert.deepEqual(boxes[index], [entry.width, entry.height]);
+    assert(!(entry.width === 1600 && entry.height === 900));
+    assert.doesNotMatch(svg, /<text|<image|href=|font-family|undefined|NaN/u);
+    const slideIndex = entry.deckSlide - 1; assert.equal(split.plan[slideIndex].title, entry.title);
+    const charts = await split.chartsOf(slideIndex);
+    const haystack = decode(split.slides[slideIndex] + charts.map((chart) => chart.chart).join(""));
+    for (const value of entry.sourceValues) assert(haystack.includes(value), `bundle item ${entry.id} value ${value} is not in deck slide ${entry.deckSlide}`);
+  }
+});

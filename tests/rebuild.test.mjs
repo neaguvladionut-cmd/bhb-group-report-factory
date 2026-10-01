@@ -57,7 +57,8 @@ test("split report plan places whole project before CODE groups and keeps named 
   const firstAnnex = plan.findIndex((item) => item.deliverable === "appendix");
   assert(firstGroup > 0);
   assert(firstAnnex > firstGroup);
-  assert(plan.filter((item) => item.deliverable === "appendix").every((item) => item.family === "appendix-divider" || item.family === "participant-comparison" || item.appendix || item.family === "competency-distribution"));
+  assert(plan.filter((item) => item.deliverable === "appendix").every((item) => ["appendix-divider", "participant-mean", "participant-comparison", "competency-participants"].includes(item.family)));
+  assert(plan.filter((item) => item.deliverable === "appendix").every((item) => !item.groupKey));
 });
 
 test("audit workbook carries groups, zones and ranking sheets", () => {
