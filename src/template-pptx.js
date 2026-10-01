@@ -1,5 +1,5 @@
 import { reportPlan, BUNDLE_FAMILIES, f2 } from "./rebuild-report-plan.js";
-import { EMU, NEW_SHAPE_PREFIX, xmlEscape, getShape, updateShape, hasShape, hideShape, addToTree, xfrmOf, setXfrm, setParagraphs, appendToLastRun, setRunText, templateParagraphs, regularRPr, boldRPr, setRPrAttr, setRPrColor, fitText, withoutBullet, setBodyInsets, moveBand, plotLayoutFromBand, tableRows, rowHeight, isShadedRow, setRowCells, setRowHeight, setRowId, replaceTableRows, rowLayout, placeBrace, fillChartXml, chartWorkbookRows, roundChartValue, newTextShape, newRectShape } from "./trend-fill.js";
+import { EMU, NEW_SHAPE_PREFIX, xmlEscape, getShape, updateShape, hasShape, hideShape, addToTree, xfrmOf, setXfrm, setParagraphs, appendToLastRun, setRunText, templateParagraphs, regularRPr, boldRPr, setRPrAttr, setRPrColor, fitText, withoutBullet, setBodyInsets, moveBand, plotLayoutFromBand, visualBox, groupScale, tableRows, rowHeight, isShadedRow, setRowCells, setRowHeight, setRowId, replaceTableRows, rowLayout, placeBrace, fillChartXml, chartWorkbookRows, roundChartValue, newTextShape, newRectShape } from "./trend-fill.js";
 
 const TEMPLATE_PATH = "./assets/trend/template-raport-de-grup-RO.pptx";
 const FONT_PATH = "./assets/vendor/Poppins-Regular.ttf";
@@ -64,8 +64,8 @@ function columnLabelSize(rows) {
 
 // ---------------------------------------------------------------- slide fillers (fill map §1)
 const groupSuffix = (item) => item.suffix || "";
-const fill = (xml, id, paragraphs, options = {}) => updateShape(xml, id, (shape) => { const filled = setParagraphs(shape, paragraphs, options); return options.fit === false ? filled : fitText(filled); });
-const titleSuffix = (xml, id, item) => groupSuffix(item) ? updateShape(xml, id, (shape) => appendToLastRun(shape, groupSuffix(item))) : xml;
+const fill = (xml, id, paragraphs, options = {}) => { const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => { const filled = setParagraphs(shape, paragraphs, options); return options.fit === false ? filled : fitText(filled, scale); }); };
+const titleSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitText(appendToLastRun(shape, groupSuffix(item)), scale)); };
 const bandRange = (item) => ({ low: Number(item.low ?? 2.75), high: Number(item.high ?? 3.5) });
 function applyBand(xml, spec, item) {
   if (!spec?.band) return xml;
@@ -313,6 +313,12 @@ async function updateCharts(zip, plan) {
     for (const rel of charts) {
       const chartPath = relationshipTarget(slideName(index + 1), rel.Target);
       const options = { ...spec.options };
+      if (item.family === "range") {
+        // chart1 (box plot) also has an automatic plot area: pin it to the band's 1–5 mapping (rule 4).
+        const slide = await zip.file(slideName(index + 1)).async("string");
+        const band = visualBox(getShape(slide, 2)); const frame = xfrmOf(getShape(slide, 22));
+        options.plotLayout = plotLayoutFromBand(getShape(slide, 2), getShape(slide, 22), { ...bandRange(item), axis: "y", cross: [(band.x - frame.x) / frame.cx, band.cx / frame.cx] });
+      }
       if (item.family === "participant-mean") {
         // chart2 has an automatic plot area; pin it to the band's own 1–5 mapping so long names cannot shift it (rule 4).
         const slide = await zip.file(slideName(index + 1)).async("string");

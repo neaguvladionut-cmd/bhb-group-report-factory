@@ -709,7 +709,7 @@ const shapeText = (shapeXml) => paragraphsOf(shapeXml).map((paragraph) => runTex
 // ---------- rule 7: text fit ----------
 const bodyPrOf = (shapeXml) => shapeXml.match(/<a:bodyPr\b[^>]*\/>|<a:bodyPr\b[^>]*>[\s\S]*?<\/a:bodyPr>/u)?.[0] || "";
 const insetOf = (bodyPr, name, fallback) => Number(bodyPr.match(new RegExp(`\\s${name}="(\\d+)"`, "u"))?.[1] ?? fallback);
-function textHeightNeeded(shapeXml, scale = 1, widthEmu = null) {
+function textHeightNeeded(shapeXml, scale = 1, widthEmu = null, spacing = 1) {
   const geometry = xfrmOf(shapeXml); const bodyPr = bodyPrOf(shapeXml);
   const width = (widthEmu ?? geometry.cx) - insetOf(bodyPr, "lIns", 91440) - insetOf(bodyPr, "rIns", 91440);
   let height = 0;
@@ -723,7 +723,8 @@ function textHeightNeeded(shapeXml, scale = 1, widthEmu = null) {
     const after = Number(pPr.match(/<a:spcAft><a:spcPts val="(\d+)"/u)?.[1] || 0) / 100 * scale;
     const content = runTexts(paragraph).join("").replace(/&[a-z]+;/gu, "x");
     const usable = Math.max(1, (width - margin) / 12700); // points
-    const charWidth = size * 0.53;
+    const rPrs = runRPrs(paragraph); const letterSpacing = Math.max(0, ...rPrs.map((rPr) => Number(rPr.match(/\sspc="(-?\d+)"/u)?.[1] || 0))) / 100 * scale;
+    const charWidth = size * (rPrs.some((rPr) => /\sb="1"/u.test(rPr)) ? 0.57 : 0.53) + letterSpacing;
     let lines = 0;
     for (const part of content.split("\t").join("    ").split("\n")) {
       let line = 0; lines += 1;
@@ -733,18 +734,38 @@ function textHeightNeeded(shapeXml, scale = 1, widthEmu = null) {
         while (line > usable) { lines += 1; line -= usable; }
       }
     }
-    height += lines * size * 1.2 * lineFactor + before + after;
+    height += lines * size * 1.2 * lineFactor * spacing + before + after;
   }
   return height * 12700 + insetOf(bodyPr, "tIns", 45720) + insetOf(bodyPr, "bIns", 45720);
 }
-function fitText(shapeXml, { minScale = 0.7, height = null } = {}) {
+/** Scale that enclosing groups apply to a shape's child coordinates (text keeps its point size). */
+function groupScale(xml, id) {
+  const range = shapeRange(xml, id); let scaleX = 1; let scaleY = 1;
+  if (!range) return { scaleX, scaleY };
+  const groupOpen = /<p:grpSp>/gu; let match;
+  while ((match = groupOpen.exec(xml)) && match.index < range.start) {
+    const group = shapeRange(xml.slice(0, match.index) + xml.slice(match.index), (xml.slice(match.index).match(/<p:cNvPr\b[^>]*\bid="(\d+)"/u) || [])[1]);
+    if (!group || group.end < range.end) continue;
+    const head = xml.slice(group.start, group.end).match(/<p:grpSpPr>[\s\S]*?<\/a:xfrm>/u)?.[0] || "";
+    const ext = head.match(/<a:ext cx="(\d+)" cy="(\d+)"/u); const chExt = head.match(/<a:chExt cx="(\d+)" cy="(\d+)"/u);
+    if (ext && chExt && Number(chExt[1]) && Number(chExt[2])) { scaleX *= Number(ext[1]) / Number(chExt[1]); scaleY *= Number(ext[2]) / Number(chExt[2]); }
+  }
+  return { scaleX, scaleY };
+}
+function fitText(shapeXml, { minScale = 0.7, height = null, scaleX = 1, scaleY = 1 } = {}) {
   const geometry = xfrmOf(shapeXml); if (!geometry) return shapeXml;
-  const available = height ?? geometry.cy;
-  if (textHeightNeeded(shapeXml, 1) <= available) return shapeXml;
+  const available = (height ?? geometry.cy) * scaleY;
+  const width = geometry.cx * scaleX;
+  const textHeightNeeded_ = textHeightNeeded;
+  const textHeightNeeded__ = (xml, scale, ignored, spacing = 1) => textHeightNeeded_(xml, scale, width, spacing);
+  if (textHeightNeeded__(shapeXml, 1) <= available) return shapeXml;
   let scale = 1;
-  while (scale > minScale && textHeightNeeded(shapeXml, scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  while (scale > minScale && textHeightNeeded__(shapeXml, scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
   scale = Math.max(minScale, scale);
-  return setAutofit(shapeXml, `<a:normAutofit fontScale="${Math.round(scale * 100000)}"/>`);
+  // Still too tall at the 70 % floor: let PowerPoint also reduce line spacing (up to 20 %), as its own autofit does.
+  let reduction = 0;
+  while (reduction < 0.2 && textHeightNeeded__(shapeXml, scale, null, 1 - reduction) > available) reduction = Math.round((reduction + 0.05) * 100) / 100;
+  return setAutofit(shapeXml, `<a:normAutofit fontScale="${Math.round(scale * 100000)}"${reduction ? ` lnSpcReduction="${Math.round(reduction * 100000)}"` : ""}/>`);
 }
 function setAutofit(shapeXml, autofit) {
   const bodyPr = bodyPrOf(shapeXml);
@@ -907,10 +928,10 @@ function withoutBullet(style) {
   return { ...style, pPr };
 }
 
-Object.assign(window.__grf||(window.__grf={}),{EMU,NEW_SHAPE_PREFIX,xmlEscape,shapeRange,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,paragraphsOf,runRPrs,runTexts,setRPrAttr,setRPrColor,templateParagraphs,regularRPr,boldRPr,setParagraphs,appendToLastRun,setRunText,shapeText,textHeightNeeded,fitText,setAutofit,fontScaleOf,setBodyInsets,visualBox,setVisualBox,moveBand,plotLayoutFromBand,setPlotLayout,tableRows,rowHeight,isShadedRow,setCellText,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,columnName,roundChartValue,fillChartXml,chartWorkbookRows,newTextShape,newRectShape,withoutBullet});})();
+Object.assign(window.__grf||(window.__grf={}),{EMU,NEW_SHAPE_PREFIX,xmlEscape,shapeRange,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,paragraphsOf,runRPrs,runTexts,setRPrAttr,setRPrColor,templateParagraphs,regularRPr,boldRPr,setParagraphs,appendToLastRun,setRunText,shapeText,textHeightNeeded,groupScale,fitText,setAutofit,fontScaleOf,setBodyInsets,visualBox,setVisualBox,moveBand,plotLayoutFromBand,setPlotLayout,tableRows,rowHeight,isShadedRow,setCellText,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,columnName,roundChartValue,fillChartXml,chartWorkbookRows,newTextShape,newRectShape,withoutBullet});})();
 
 (()=>{const {reportPlan,BUNDLE_FAMILIES,f2}=window.__grf;
-const {EMU,NEW_SHAPE_PREFIX,xmlEscape,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,setParagraphs,appendToLastRun,setRunText,templateParagraphs,regularRPr,boldRPr,setRPrAttr,setRPrColor,fitText,withoutBullet,setBodyInsets,moveBand,plotLayoutFromBand,tableRows,rowHeight,isShadedRow,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,fillChartXml,chartWorkbookRows,roundChartValue,newTextShape,newRectShape}=window.__grf;
+const {EMU,NEW_SHAPE_PREFIX,xmlEscape,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,setParagraphs,appendToLastRun,setRunText,templateParagraphs,regularRPr,boldRPr,setRPrAttr,setRPrColor,fitText,withoutBullet,setBodyInsets,moveBand,plotLayoutFromBand,visualBox,groupScale,tableRows,rowHeight,isShadedRow,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,fillChartXml,chartWorkbookRows,roundChartValue,newTextShape,newRectShape}=window.__grf;
 
 const TEMPLATE_PATH = "./assets/trend/template-raport-de-grup-RO.pptx";
 const FONT_PATH = "./assets/vendor/Poppins-Regular.ttf";
@@ -975,8 +996,8 @@ function columnLabelSize(rows) {
 
 // ---------------------------------------------------------------- slide fillers (fill map §1)
 const groupSuffix = (item) => item.suffix || "";
-const fill = (xml, id, paragraphs, options = {}) => updateShape(xml, id, (shape) => { const filled = setParagraphs(shape, paragraphs, options); return options.fit === false ? filled : fitText(filled); });
-const titleSuffix = (xml, id, item) => groupSuffix(item) ? updateShape(xml, id, (shape) => appendToLastRun(shape, groupSuffix(item))) : xml;
+const fill = (xml, id, paragraphs, options = {}) => { const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => { const filled = setParagraphs(shape, paragraphs, options); return options.fit === false ? filled : fitText(filled, scale); }); };
+const titleSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitText(appendToLastRun(shape, groupSuffix(item)), scale)); };
 const bandRange = (item) => ({ low: Number(item.low ?? 2.75), high: Number(item.high ?? 3.5) });
 function applyBand(xml, spec, item) {
   if (!spec?.band) return xml;
@@ -1224,6 +1245,12 @@ async function updateCharts(zip, plan) {
     for (const rel of charts) {
       const chartPath = relationshipTarget(slideName(index + 1), rel.Target);
       const options = { ...spec.options };
+      if (item.family === "range") {
+        // chart1 (box plot) also has an automatic plot area: pin it to the band's 1–5 mapping (rule 4).
+        const slide = await zip.file(slideName(index + 1)).async("string");
+        const band = visualBox(getShape(slide, 2)); const frame = xfrmOf(getShape(slide, 22));
+        options.plotLayout = plotLayoutFromBand(getShape(slide, 2), getShape(slide, 22), { ...bandRange(item), axis: "y", cross: [(band.x - frame.x) / frame.cx, band.cx / frame.cx] });
+      }
       if (item.family === "participant-mean") {
         // chart2 has an automatic plot area; pin it to the band's own 1–5 mapping so long names cannot shift it (rule 4).
         const slide = await zip.file(slideName(index + 1)).async("string");
@@ -1508,7 +1535,7 @@ const text = (value) => String(value ?? "").trim();
 function metadata() {
   const groupNames = Object.fromEntries($$(`[data-group-name]`).map((input) => [input.dataset.groupName, input.value]));
   const slideToggles = Object.fromEntries($$(`[data-slide-toggle]`).map((input) => [input.dataset.slideToggle, input.checked]));
-  return { projectName: $("#project-name")?.value || "", clientName: $("#client-name")?.value || "", reportDate: $("#report-date")?.value || "", context: $("#report-context")?.value || "", exercises: $("#exercise-list")?.value || "", otherInstruments: $("#other-instruments")?.value || "", conclusions: $("#conclusions")?.value || "", executiveConclusions: $("#conclusions")?.value || "", program: $("#program")?.value || "", evaluators: $("#evaluators")?.value || "", days: $("#days")?.value || "", exerciseCount: $("#exercise-count")?.value || "", conclusionsStrengths: $("#conclusions-strengths")?.value || "", conclusionsDevelopment: $("#conclusions-development")?.value || "", conclusionsInterventions: $("#conclusions-interventions")?.value || "", benchmarkLow: $("#benchmark-low")?.value ?? "2.75", benchmarkHigh: $("#benchmark-high")?.value ?? "3.5", annex: $("#annex-setting")?.value || "end", splitGroups: Boolean($("#split-groups")?.checked), groupNames, slideToggles };
+  return { projectName: $("#project-name")?.value || "", clientName: $("#client-name")?.value || "", reportDate: $("#report-date")?.value || "", context: $("#report-context")?.value || "", exercises: $("#exercise-list")?.value || "", otherInstruments: $("#other-instruments")?.value || "", conclusions: $("#conclusions")?.value || "", executiveConclusions: $("#conclusions")?.value || "", program: $("#program")?.value || "", methodologyText: $("#methodology-text")?.value ?? "", evaluators: $("#evaluators")?.value || "", days: $("#days")?.value || "", exerciseCount: $("#exercise-count")?.value || "", conclusionsStrengths: $("#conclusions-strengths")?.value || "", conclusionsDevelopment: $("#conclusions-development")?.value || "", conclusionsInterventions: $("#conclusions-interventions")?.value || "", benchmarkLow: $("#benchmark-low")?.value ?? "2.75", benchmarkHigh: $("#benchmark-high")?.value ?? "3.5", annex: $("#annex-setting")?.value || "end", splitGroups: Boolean($("#split-groups")?.checked), groupNames, slideToggles };
 }
 
 function download(blob, name) {
@@ -1620,7 +1647,7 @@ async function createDownload(kind) {
 }
 
 $("#sources")?.addEventListener("change", readSources);
-["#project-name", "#client-name", "#report-date", "#report-context", "#program", "#evaluators", "#days", "#exercise-count", "#exercise-list", "#other-instruments", "#conclusions", "#conclusions-strengths", "#conclusions-development", "#conclusions-interventions", "#benchmark-low", "#benchmark-high", "#annex-setting", "#split-groups"].forEach((selector) => $(selector)?.addEventListener("input", invalidate));
+["#project-name", "#client-name", "#report-date", "#report-context", "#program", "#evaluators", "#days", "#exercise-count", "#exercise-list", "#other-instruments", "#methodology-text", "#conclusions", "#conclusions-strengths", "#conclusions-development", "#conclusions-interventions", "#benchmark-low", "#benchmark-high", "#annex-setting", "#split-groups"].forEach((selector) => $(selector)?.addEventListener("input", invalidate));
 $$(`[data-slide-toggle]`).forEach((input) => input.addEventListener("change", invalidate));
 $("#to-step-2")?.addEventListener("click", () => { state.step = 2; render(); });
 $("#to-step-3")?.addEventListener("click", () => { state.step = 3; render(); });

@@ -121,7 +121,7 @@ export const shapeText = (shapeXml) => paragraphsOf(shapeXml).map((paragraph) =>
 // ---------- rule 7: text fit ----------
 const bodyPrOf = (shapeXml) => shapeXml.match(/<a:bodyPr\b[^>]*\/>|<a:bodyPr\b[^>]*>[\s\S]*?<\/a:bodyPr>/u)?.[0] || "";
 const insetOf = (bodyPr, name, fallback) => Number(bodyPr.match(new RegExp(`\\s${name}="(\\d+)"`, "u"))?.[1] ?? fallback);
-export function textHeightNeeded(shapeXml, scale = 1, widthEmu = null) {
+export function textHeightNeeded(shapeXml, scale = 1, widthEmu = null, spacing = 1) {
   const geometry = xfrmOf(shapeXml); const bodyPr = bodyPrOf(shapeXml);
   const width = (widthEmu ?? geometry.cx) - insetOf(bodyPr, "lIns", 91440) - insetOf(bodyPr, "rIns", 91440);
   let height = 0;
@@ -135,7 +135,8 @@ export function textHeightNeeded(shapeXml, scale = 1, widthEmu = null) {
     const after = Number(pPr.match(/<a:spcAft><a:spcPts val="(\d+)"/u)?.[1] || 0) / 100 * scale;
     const content = runTexts(paragraph).join("").replace(/&[a-z]+;/gu, "x");
     const usable = Math.max(1, (width - margin) / 12700); // points
-    const charWidth = size * 0.53;
+    const rPrs = runRPrs(paragraph); const letterSpacing = Math.max(0, ...rPrs.map((rPr) => Number(rPr.match(/\sspc="(-?\d+)"/u)?.[1] || 0))) / 100 * scale;
+    const charWidth = size * (rPrs.some((rPr) => /\sb="1"/u.test(rPr)) ? 0.57 : 0.53) + letterSpacing;
     let lines = 0;
     for (const part of content.split("\t").join("    ").split("\n")) {
       let line = 0; lines += 1;
@@ -145,18 +146,38 @@ export function textHeightNeeded(shapeXml, scale = 1, widthEmu = null) {
         while (line > usable) { lines += 1; line -= usable; }
       }
     }
-    height += lines * size * 1.2 * lineFactor + before + after;
+    height += lines * size * 1.2 * lineFactor * spacing + before + after;
   }
   return height * 12700 + insetOf(bodyPr, "tIns", 45720) + insetOf(bodyPr, "bIns", 45720);
 }
-export function fitText(shapeXml, { minScale = 0.7, height = null } = {}) {
+/** Scale that enclosing groups apply to a shape's child coordinates (text keeps its point size). */
+export function groupScale(xml, id) {
+  const range = shapeRange(xml, id); let scaleX = 1; let scaleY = 1;
+  if (!range) return { scaleX, scaleY };
+  const groupOpen = /<p:grpSp>/gu; let match;
+  while ((match = groupOpen.exec(xml)) && match.index < range.start) {
+    const group = shapeRange(xml.slice(0, match.index) + xml.slice(match.index), (xml.slice(match.index).match(/<p:cNvPr\b[^>]*\bid="(\d+)"/u) || [])[1]);
+    if (!group || group.end < range.end) continue;
+    const head = xml.slice(group.start, group.end).match(/<p:grpSpPr>[\s\S]*?<\/a:xfrm>/u)?.[0] || "";
+    const ext = head.match(/<a:ext cx="(\d+)" cy="(\d+)"/u); const chExt = head.match(/<a:chExt cx="(\d+)" cy="(\d+)"/u);
+    if (ext && chExt && Number(chExt[1]) && Number(chExt[2])) { scaleX *= Number(ext[1]) / Number(chExt[1]); scaleY *= Number(ext[2]) / Number(chExt[2]); }
+  }
+  return { scaleX, scaleY };
+}
+export function fitText(shapeXml, { minScale = 0.7, height = null, scaleX = 1, scaleY = 1 } = {}) {
   const geometry = xfrmOf(shapeXml); if (!geometry) return shapeXml;
-  const available = height ?? geometry.cy;
-  if (textHeightNeeded(shapeXml, 1) <= available) return shapeXml;
+  const available = (height ?? geometry.cy) * scaleY;
+  const width = geometry.cx * scaleX;
+  const textHeightNeeded_ = textHeightNeeded;
+  const textHeightNeeded__ = (xml, scale, ignored, spacing = 1) => textHeightNeeded_(xml, scale, width, spacing);
+  if (textHeightNeeded__(shapeXml, 1) <= available) return shapeXml;
   let scale = 1;
-  while (scale > minScale && textHeightNeeded(shapeXml, scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  while (scale > minScale && textHeightNeeded__(shapeXml, scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
   scale = Math.max(minScale, scale);
-  return setAutofit(shapeXml, `<a:normAutofit fontScale="${Math.round(scale * 100000)}"/>`);
+  // Still too tall at the 70 % floor: let PowerPoint also reduce line spacing (up to 20 %), as its own autofit does.
+  let reduction = 0;
+  while (reduction < 0.2 && textHeightNeeded__(shapeXml, scale, null, 1 - reduction) > available) reduction = Math.round((reduction + 0.05) * 100) / 100;
+  return setAutofit(shapeXml, `<a:normAutofit fontScale="${Math.round(scale * 100000)}"${reduction ? ` lnSpcReduction="${Math.round(reduction * 100000)}"` : ""}/>`);
 }
 export function setAutofit(shapeXml, autofit) {
   const bodyPr = bodyPrOf(shapeXml);
