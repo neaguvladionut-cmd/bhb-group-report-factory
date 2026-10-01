@@ -149,6 +149,10 @@ test("generated CSV template retains all imported behaviors, including all-missi
   const rows = XLSX.utils.sheet_to_json(output.Sheets["Evaluation sheet"], { header: 1, defval: "" });
   assert.equal(rows.length - 1, 30);
   assert.deepEqual(rows.slice(1).map((row) => row[2]), Array.from({ length: 30 }, (_, index) => `Behavior ${index + 1}`));
+  const csv = XLSX.write(output, { type: "string", bookType: "csv" });
+  const csvRows = csv.trimEnd().split(/\r?\n/u);
+  assert.equal(csvRows.length, 31);
+  for (let index = 0; index < 30; index += 1) assert.match(csvRows[index + 1], new RegExp(`Behavior ${index + 1}`, "u"));
 });
 
 test("generated annex output applies the how-to-read wording for all settings", async () => {
