@@ -11,7 +11,8 @@ const source = resolve(sourceArg || "50-source-materials/11. Competency Profiler
 const output = resolve(outputArg || join(root, "src/assets/trend/template-raport-de-grup-RO.pptx"));
 // The generated output is intentionally git-ignored until Vlad confirms H1.
 
-if (!sourceArg && !process.argv.includes("--source-default-ok")) {
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
+if (isMain && !sourceArg && !process.argv.includes("--source-default-ok")) {
   console.error("Usage: node tools/clean-template.mjs <source.pptx> [output.pptx]");
   process.exitCode = 2;
   process.exit();
@@ -56,8 +57,53 @@ function removeNotesMasterList(xml) {
   return xml.replace(/<p:notesMasterIdLst\b[^>]*>[\s\S]*?<\/p:notesMasterIdLst>/giu, "");
 }
 
-function clearSlideText(xml) {
-  return xml.replace(/(<a:t(?:\s[^>]*)?>)[\s\S]*?(<\/a:t>)/gu, "$1$2");
+// Cleaned asset v2 (BP-GRF-R fill map §0 rule 2): Trend's fixed wording stays; only example data is cleared.
+// Keyed by slide number and cNvPr id. Modes: "all" clears every run of the shape (table cells included),
+// "first" clears the first run only, "after-first" clears every run after the first, and a RegExp
+// removes matching text inside every run of the shape. Shapes not listed keep their text.
+export const EXAMPLE_DATA = {
+  1: { 15: "all", 23: "first" },
+  2: { 5: "all", 6: "all" },
+  7: { 2: "all", 4: "all", 11: "all", 13: "all", 16: "all", 17: /\d+\s?%\s?/gu },
+  12: { 6: "all", 11: "all", 13: "all", 16: "all", 17: "all", 18: "all", 21: "after-first" },
+  21: { 4: "all", 7: "all", 11: "all" }
+};
+
+function shapeRange(xml, id) {
+  const marker = new RegExp(`<p:cNvPr\\b[^>]*\\bid="${id}"`, "u").exec(xml);
+  if (!marker) throw new Error(`clean-template: shape id ${id} not found`);
+  const before = xml.slice(0, marker.index);
+  const open = [...before.matchAll(/<p:(sp|graphicFrame|grpSp|pic|cxnSp)\b/gu)].at(-1);
+  const tag = open[1];
+  const re = new RegExp(`<p:${tag}\\b|</p:${tag}>`, "gu");
+  re.lastIndex = open.index;
+  let depth = 0;
+  for (let match = re.exec(xml); match; match = re.exec(xml)) {
+    depth += match[0].startsWith("</") ? -1 : 1;
+    if (!depth) return [open.index, match.index + match[0].length];
+  }
+  throw new Error(`clean-template: unbalanced shape ${id}`);
+}
+
+export function clearSlideText(xml, slideNumber) {
+  const rules = EXAMPLE_DATA[slideNumber] || {};
+  for (const [id, mode] of Object.entries(rules)) {
+    const [start, end] = shapeRange(xml, id);
+    let index = 0;
+    const shape = xml.slice(start, end).replace(/(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu, (whole, open, text, close) => {
+      const current = index; index += 1;
+      if (mode === "all" || (mode === "first" && current === 0) || (mode === "after-first" && current > 0)) return `${open}${close}`;
+      if (mode instanceof RegExp) return `${open}${text.replace(mode, "")}${close}`;
+      return whole;
+    });
+    xml = `${xml.slice(0, start)}${shape}${xml.slice(end)}`;
+  }
+  return xml;
+}
+
+function renameWorkbookSheets(xml) {
+  let index = 0;
+  return xml.replace(/<sheet\b([^>]*?)\bname="[^"]*"/gu, (whole, before) => { index += 1; return `<sheet${before}name="Sheet${index}"`; });
 }
 
 function clearChartCaches(xml) {
@@ -105,8 +151,9 @@ async function clean(sourceDir) {
       xml = scrubMetadata(xml);
       if (part === "ppt/presentation.xml") xml = removeNotesMasterList(xml);
       if (/^ppt\/slides\/slide\d+\.xml$/u.test(part)) {
-        xml = clearSlideText(xml);
-        textParts.push(part);
+        const cleared = clearSlideText(xml, Number(part.match(/slide(\d+)\.xml/u)[1]));
+        if (cleared !== xml) textParts.push(part);
+        xml = cleared;
       }
       if (/^ppt\/charts\/chart\d+\.xml$/u.test(part)) xml = clearChartCaches(xml);
       if (part === "docProps/app.xml") {
@@ -122,6 +169,8 @@ async function clean(sourceDir) {
         const nestedPart = relative(nestedOutput, nestedFile).replaceAll("\\", "/");
         if (nestedPart.endsWith(".xml") || nestedPart.endsWith(".rels")) {
           let xml = clearWorkbookCells(await readFile(nestedFile, "utf8"));
+          if (nestedPart === "xl/workbook.xml") xml = renameWorkbookSheets(xml);
+          if (/^xl\/tables\/table\d+\.xml$/u.test(nestedPart)) { let column = 0; xml = xml.replace(/(<tableColumn\b[^>]*\bname=")[^"]*"/gu, (whole, head) => { column += 1; return `${head}Column${column}"`; }); }
           xml = scrubMetadata(xml);
           if (nestedPart === "docProps/app.xml") xml = xml.replace(/<Application>[^<]*<\/Application>/giu, "<Application>Microsoft Excel</Application>");
           await writeFile(nestedFile, stripXmlPartReferences(xml));
@@ -198,32 +247,34 @@ async function selfCheck(packageDir) {
   return { danglingReferences: "PASS", metadata: "PASS", fonts: "PASS" };
 }
 
-await stat(source);
-const work = await mkdtemp(join(tmpdir(), "grf-clean-template-"));
-try {
-  await run("unzip", ["-q", source, "-d", work]);
-  await clean(work);
-  const checks = await selfCheck(work);
-  await mkdir(dirname(output), { recursive: true });
-  await rm(output, { force: true });
-  const old = process.cwd();
-  process.chdir(work);
-  await run("zip", ["-q", "-X", "-r", output, "."]);
-  process.chdir(old);
-  const parts = (await walk(work)).map((file) => relative(work, file).replaceAll("\\", "/")).sort();
-  console.log(`clean-template source=${source}`);
-  console.log(`clean-template output=${output}`);
-  console.log(`removed=${removedParts.join(",") || "none"}`);
-  console.log(`cleared-slide-text=${textParts.length}`);
-  console.log(`xml-parts=${xmlFiles.length}`);
-  console.log(`kept-parts=${parts.length}`);
-  console.log(`self-check dangling-references=${checks.danglingReferences}`);
-  console.log(`self-check metadata=${checks.metadata}`);
-  console.log(`self-check fonts=${checks.fonts}`);
-  for (const part of parts) {
-    const info = await stat(join(work, part));
-    console.log(`${String(info.size).padStart(9, " ")}  ${part}`);
+if (isMain) {
+  await stat(source);
+  const work = await mkdtemp(join(tmpdir(), "grf-clean-template-"));
+  try {
+    await run("unzip", ["-q", source, "-d", work]);
+    await clean(work);
+    const checks = await selfCheck(work);
+    await mkdir(dirname(output), { recursive: true });
+    await rm(output, { force: true });
+    const old = process.cwd();
+    process.chdir(work);
+    await run("zip", ["-q", "-X", "-r", output, "."]);
+    process.chdir(old);
+    const parts = (await walk(work)).map((file) => relative(work, file).replaceAll("\\", "/")).sort();
+    console.log(`clean-template source=${source}`);
+    console.log(`clean-template output=${output}`);
+    console.log(`removed=${removedParts.join(",") || "none"}`);
+    console.log(`cleared-slide-text=${textParts.length}`);
+    console.log(`xml-parts=${xmlFiles.length}`);
+    console.log(`kept-parts=${parts.length}`);
+    console.log(`self-check dangling-references=${checks.danglingReferences}`);
+    console.log(`self-check metadata=${checks.metadata}`);
+    console.log(`self-check fonts=${checks.fonts}`);
+    for (const part of parts) {
+      const info = await stat(join(work, part));
+      console.log(`${String(info.size).padStart(9, " ")}  ${part}`);
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true });
   }
-} finally {
-  await rm(work, { recursive: true, force: true });
 }
