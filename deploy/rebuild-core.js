@@ -148,7 +148,8 @@ function parseDetailed(schema, corrections = {}) {
     }
     records.push({ name, assessment, identity, code, region, scores, rowNumber, source: schema.sourceName });
   }
-  return { records, behaviorRecords, competencies: [...new Set(columns.map(({ competency }) => competency))], issues };
+  const behaviorCatalog = columns.filter((column, index, all) => all.findIndex((candidate) => candidate.competency === column.competency && candidate.behavior === column.behavior) === index).map((column) => ({ competency: column.competency, subcompetency: column.subcompetency || "", behavior: column.behavior }));
+  return { records, behaviorRecords, behaviorCatalog, competencies: [...new Set(columns.map(({ competency }) => competency))], issues };
 }
 
 function parseDescriptors(schema) {
@@ -213,7 +214,7 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const summary = summaries[0];
   const detailed = detailedSources[0];
   const parsedSummary = summary ? parseSummary(summary, corrections) : { records: [], competencies: [], issues: [] };
-  const parsedDetailed = detailed ? parseDetailed(detailed, corrections) : { records: [], behaviorRecords: [], competencies: [], issues: [] };
+  const parsedDetailed = detailed ? parseDetailed(detailed, corrections) : { records: [], behaviorRecords: [], behaviorCatalog: [], competencies: [], issues: [] };
   blockers.push(...parsedSummary.issues.filter((item) => item.severity === "blocker"), ...parsedDetailed.issues.filter((item) => item.severity === "blocker"));
   warnings.push(...parsedSummary.issues.filter((item) => item.severity === "warning"), ...parsedDetailed.issues.filter((item) => item.severity === "warning"));
   const descriptorParsed = descriptorSources.map(parseDescriptors);
@@ -252,7 +253,7 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const finalWarnings = warnings.map((item) => ({ ...item, reviewed: acknowledged.has(item.id) }));
   const groups = codeValues.map((code) => ({ code, name: code, records: records.filter((record) => record.code === code) }));
   const zoneCalculations = zones.flatMap((zone) => parsedSummary.competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) })));
-  const descriptorTemplate = parsedDetailed.behaviorRecords.filter((row, index, all) => all.findIndex((candidate) => candidate.competency === row.competency && candidate.behavior === row.behavior) === index).map((row) => ({ competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behavior, objective_text_score_0: "", "objective_text_score_-1": "", objective_text_score_1: "", objective_text_score_2: "" }));
+  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => ({ competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behavior, objective_text_score_0: "", "objective_text_score_-1": "", objective_text_score_1: "", objective_text_score_2: "" }));
   return {
     calculationVersion: CALCULATION_VERSION,
     createdAt: new Date().toISOString(),

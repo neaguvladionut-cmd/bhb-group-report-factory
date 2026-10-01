@@ -34,7 +34,11 @@ export function rankBehaviors(rows = []) {
 export const behaviorInsights = (rows) => rankBehaviors(rows).map((item) => ({ ...item, strengths: item.key, development: item.development }));
 export const behaviorPageGroups = (rows) => pageGroups(rows, 6);
 
-export const HOW_TO_READ = (low = 2.75, high = 3.5, annex = "end") => `Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim. Banda gri din grafice marchează intervalul de referință (benchmark) de ${low.toFixed(2).replace(".", ",")}–${high.toFixed(2).replace(".", ",")}. Rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie. Media arată nivelul general al grupului, iar mediana este mai puțin influențată de rezultatele extreme. Abilitățile cheie sunt comportamentele cel mai bine demonstrate; abilitățile de dezvoltat sunt cele mai puțin demonstrate. Rezultatele individuale se regăsesc ${annex === "separate" ? "în anexa transmisă separat" : annex === "none" ? "în livrarea individuală a instrumentului" : "în anexă"}.`;
+export const HOW_TO_READ = (low = 2.75, high = 3.5, annex = "end") => {
+  const base = `Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim. Banda gri din grafice marchează intervalul de referință (benchmark) de ${low.toFixed(2).replace(".", ",")}–${high.toFixed(2).replace(".", ",")}. Rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie. Media arată nivelul general al grupului, iar mediana este mai puțin influențată de rezultatele extreme. Abilitățile cheie sunt comportamentele cel mai bine demonstrate; abilitățile de dezvoltat sunt cele mai puțin demonstrate.`;
+  if (annex === "none") return `${base}.`;
+  return `${base} Rezultatele individuale se regăsesc ${annex === "separate" ? "în anexa transmisă separat" : "în anexă"}.`;
+};
 
 export function methodologyColumns(payload) {
   const schemas = payload.schemas || [];
@@ -73,11 +77,33 @@ export const competencyFindings = (payload, calculations = payload.calculations.
   return calculations.map((item) => ({ item, insight: insights.get(item.competency) || { key: [], development: [], strengths: [] } }));
 };
 
+function groupBehaviorAggregates(payload, identities) {
+  const grouped = new Map();
+  payload.behaviorRecords.filter((row) => identities.has(row.identity)).forEach((row) => {
+    const key = `${row.competency}\u0000${row.behavior}`;
+    if (!grouped.has(key)) grouped.set(key, { competency: row.competency, subcompetency: row.subcompetency, behavior: row.behavior, values: [], sourceIndex: row.sourceIndex });
+    grouped.get(key).values.push(row.score);
+  });
+  return [...grouped.values()].map((row) => {
+    const descriptor = payload.behaviorAggregates.find((candidate) => candidate.competency === row.competency && candidate.behavior === row.behavior) || {};
+    return { competency: row.competency, subcompetency: row.subcompetency, behavior: row.behavior, n: row.values.length, sum: row.values.reduce((sum, value) => sum + value, 0), mean: row.values.length ? row.values.reduce((sum, value) => sum + value, 0) / row.values.length : null, pct0: row.values.length ? row.values.filter((value) => value === 0).length / row.values.length : 0, pct2: row.values.length ? row.values.filter((value) => value === 2).length / row.values.length : 0, score0: descriptor.score0 || "", score2: descriptor.score2 || "", sourceIndex: row.sourceIndex };
+  });
+}
+
 function viewForGroup(payload, group) {
   const identities = new Set(group.records.map((record) => record.identity));
   const records = payload.records.filter((record) => identities.has(record.identity));
   const competencies = payload.competencies || payload.calculations.map((item) => item.competency);
-  return { ...payload, records, participantCounts: { ...payload.participantCounts, included: records.length }, calculations: competencies.map((competency) => { const values = records.map((record) => record.scores[competency]).filter(Number.isFinite); return { competency, n: values.length, mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, min: values.length ? Math.min(...values) : null, median: values.length ? values.slice().sort((a, b) => a - b)[Math.floor(values.length / 2)] : null, max: values.length ? Math.max(...values) : null }; }), behaviorAggregates: payload.behaviorAggregates.filter((row) => payload.behaviorRecords.some((record) => identities.has(record.identity) && record.competency === row.competency && record.behavior === row.behavior)) };
+  const calculations = competencies.map((competency) => { const values = records.map((record) => record.scores[competency]).filter(Number.isFinite); return { competency, n: values.length, mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, min: values.length ? Math.min(...values) : null, median: values.length ? values.slice().sort((a, b) => a - b)[Math.floor(values.length / 2)] : null, max: values.length ? Math.max(...values) : null }; });
+  const overallScores = records.map((record) => Object.values(record.scores).reduce((sum, value, _, values) => sum + value / values.length, 0));
+  const bands = { ...payload.bands, below: overallScores.filter((score) => score < payload.bands.low).length, typical: overallScores.filter((score) => score >= payload.bands.low && score <= payload.bands.high).length, above: overallScores.filter((score) => score > payload.bands.high).length, n: overallScores.length };
+  const zones = [...new Set(records.map((record) => record.region).filter(Boolean))].map((region) => ({ region, records: records.filter((record) => record.region === region) }));
+  return { ...payload, records, participantCounts: { ...payload.participantCounts, included: records.length }, calculations, bands, behaviorAggregates: groupBehaviorAggregates(payload, identities), zones, zoneCalculations: zones.flatMap((zone) => competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) }))), regionReadiness: { available: zones.length, blank: records.filter((record) => !record.region).length, disabledReason: zones.length ? "" : "Nu există valori de regiune în exportul detaliat." } };
+}
+
+function scoreStats(records, competency) {
+  const values = records.map((record) => record.scores[competency]).filter(Number.isFinite).sort((a, b) => a - b);
+  return { competency, n: values.length, mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, min: values.length ? values[0] : null, median: values.length ? values[Math.floor(values.length / 2)] : null, max: values.length ? values.at(-1) : null };
 }
 
 function addTemplateSection(slides, view, groupKey = "") {

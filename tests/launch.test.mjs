@@ -22,7 +22,7 @@ test("deploy is a classic offline entry with the Trend rebuild controls", async 
   assert.match(css, /\.workspace\{/u);
   assert.match(source, /Trend este singurul PPTX/u);
   const scripts = [...deploy.matchAll(/<script(?:(?:\s+src="([^"]+)")?)>([\s\S]*?)<\/script>/gu)];
-  assert.equal(scripts.length, 4);
+  assert.equal(scripts.length, 5);
   for (const [, src] of scripts) if (src) await access(resolve(root, "deploy", src.split("?")[0]));
 });
 
