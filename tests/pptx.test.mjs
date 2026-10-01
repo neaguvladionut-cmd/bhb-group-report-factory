@@ -13,9 +13,7 @@ const asset = resolve(root, "src/assets/trend/template-raport-de-grup-RO.pptx");
 test("Trend route uses the cleaned native template, not a generated picture deck", async () => {
   await access(asset);
   const source = await readFile(resolve(root, "src/template-pptx.js"), "utf8");
-  const wrapper = await readFile(resolve(root, "src/pptx.js"), "utf8");
   assert.doesNotMatch(source, /PptxGenJS/u);
-  assert.doesNotMatch(wrapper, /PptxGenJS/u);
   assert.match(source, /ppt\/charts/u);
   assert.match(source, /ppt\/embeddings/u);
   const { stdout } = await run("unzip", ["-l", asset]);
@@ -30,6 +28,12 @@ test("Trend route uses the cleaned native template, not a generated picture deck
   assert.doesNotMatch(stdout, /ppt\/fonts\//u);
   const presentation = (await run("unzip", ["-p", asset, "ppt/presentation.xml"])).stdout;
   assert.doesNotMatch(presentation, /notesMasterIdLst/u);
+});
+
+test("G11 retires the old renderer, report plan and BHB PowerPoint route", async () => {
+  for (const retired of ["src/app.js", "src/core.js", "src/index.html", "src/pptx.js", "src/report-plan.js", "deploy/core.js", "deploy/pptx.js", "deploy/report-plan.js", "core.js", "pptx.js", "report-plan.js"]) {
+    await assert.rejects(access(resolve(root, retired)), new RegExp("ENOENT", "u"));
+  }
 });
 
 test("clean-template declares the public-package scrub and local-only source boundary", async () => {

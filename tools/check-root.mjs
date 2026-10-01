@@ -34,6 +34,12 @@ for (const file of files) {
   }
   if (!built.equals(served)) failures.push(`${file}: root ${sha(served).slice(0, 12)} != deploy ${sha(built).slice(0, 12)}`);
 }
+const allowedRootEntries = new Set([".git", ".gitignore", ".github", "README.md", "deploy", "package.json", "src", "tests", "tools"]);
+for (const entry of await readdir(root, { withFileTypes: true })) {
+  if (!allowedRootEntries.has(entry.name) && !files.some((file) => file === entry.name || file.startsWith(`${entry.name}/`))) {
+    failures.push(`${entry.name}: stale served-root entry`);
+  }
+}
 
 if (failures.length) {
   console.error(`served root differs from deploy/ (${failures.length} of ${files.length} files):`);

@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import test from "node:test";
-import { buildPayload, createAuditWorkbook, EVAL_SHEET_HEADERS, mergeSelectedFiles } from "../src/core.js";
+import { buildPayload, createAuditWorkbook, EVAL_SHEET_HEADERS, mergeSelectedFiles } from "../src/rebuild-core.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const vendor = await readFile(resolve(root, "src/assets/vendor/xlsx.full.min.js"), "utf8");

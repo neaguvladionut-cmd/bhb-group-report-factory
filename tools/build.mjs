@@ -1,5 +1,5 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = resolve(root, "src");
@@ -28,4 +28,9 @@ const bundle=[
   `(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,mountPreview,reportPlan}=window.__grf;\n${await code("rebuild-app.js")}\n})();`
 ].join("\n\n");
 await writeFile(resolve(deploy,"app.js"),bundle);
+const servedEntries = ["app.js", "core.js", "cover-preview.css", "index.html", "pptx.js", "preview.js", "report-plan.js", "styles.css", "assets"];
+for (const entry of servedEntries) await rm(resolve(root, entry), { recursive: true, force: true });
+for (const entry of await readdir(deploy, { withFileTypes: true })) {
+  await cp(join(deploy, entry.name), resolve(root, entry.name), { recursive: true });
+}
 console.log("group-report-factory deploy built");

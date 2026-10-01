@@ -1,4 +1,4 @@
-import { reportPlan } from "./report-plan.js";
+import { reportPlan } from "./rebuild-report-plan.js";
 
 const esc=value=>String(value??"").replace(/[&<>"']/gu,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[char]);
 const fixed=value=>Number(value).toFixed(2);

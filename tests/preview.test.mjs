@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
-import { behaviorInsights, methodologyColumns, reportPlan, rankBehaviors } from "../src/report-plan.js";
+import { behaviorInsights, methodologyColumns, reportPlan, rankBehaviors } from "../src/rebuild-report-plan.js";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 
