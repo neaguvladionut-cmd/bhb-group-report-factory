@@ -114,8 +114,8 @@ function addTemplateSection(slides, view, groupKey = "") {
   add("divider", `Distribuția rezultatelor${groupKey ? ` · ${groupLabel}` : ""}`, { templateIndex: 3 });
   if (toggles.range !== false) add("range", `Mediană și plajă${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, templateIndex: 4 });
   if (toggles.competencyMean !== false) add("ranking", `Media pe competențe${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, templateIndex: 6 });
-  if (toggles.benchmark !== false) add("benchmark", `Distribuția pe benchmark${groupKey ? ` · ${groupLabel}` : ""}`, { templateIndex: 7 });
-  if (toggles.competencyDistribution !== false) add("competency-distribution", `Distribuția pe competențe${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, templateIndex: 8 });
+  if (toggles.benchmark !== false) add("benchmark", `Distribuția pe benchmark${groupKey ? ` · ${groupLabel}` : ""}`, { bands: view.bands, templateIndex: 7 });
+  if (toggles.competencyDistribution !== false) add("competency-distribution", `Distribuția pe competențe${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, records: view.records, templateIndex: 8 });
   if (toggles.zone !== false && view.regionReadiness.available) add("zone", `Rezultate pe regiuni${groupKey ? ` · ${groupLabel}` : ""}`, { items: view.zoneCalculations, templateIndex: 10 });
   add("divider", `Analiza observațiilor${groupKey ? ` · ${groupLabel}` : ""}`, { templateIndex: 11 });
   if (toggles.observation !== false) calculations.forEach((item) => add("observation", `Observații · ${item.competency}${groupKey ? ` · ${groupLabel}` : ""}`, { item, templateIndex: 12 }));

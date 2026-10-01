@@ -407,8 +407,8 @@ function addTemplateSection(slides, view, groupKey = "") {
   add("divider", `Distribuția rezultatelor${groupKey ? ` · ${groupLabel}` : ""}`, { templateIndex: 3 });
   if (toggles.range !== false) add("range", `Mediană și plajă${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, templateIndex: 4 });
   if (toggles.competencyMean !== false) add("ranking", `Media pe competențe${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, templateIndex: 6 });
-  if (toggles.benchmark !== false) add("benchmark", `Distribuția pe benchmark${groupKey ? ` · ${groupLabel}` : ""}`, { templateIndex: 7 });
-  if (toggles.competencyDistribution !== false) add("competency-distribution", `Distribuția pe competențe${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, templateIndex: 8 });
+  if (toggles.benchmark !== false) add("benchmark", `Distribuția pe benchmark${groupKey ? ` · ${groupLabel}` : ""}`, { bands: view.bands, templateIndex: 7 });
+  if (toggles.competencyDistribution !== false) add("competency-distribution", `Distribuția pe competențe${groupKey ? ` · ${groupLabel}` : ""}`, { items: calculations, records: view.records, templateIndex: 8 });
   if (toggles.zone !== false && view.regionReadiness.available) add("zone", `Rezultate pe regiuni${groupKey ? ` · ${groupLabel}` : ""}`, { items: view.zoneCalculations, templateIndex: 10 });
   add("divider", `Analiza observațiilor${groupKey ? ` · ${groupLabel}` : ""}`, { templateIndex: 11 });
   if (toggles.observation !== false) calculations.forEach((item) => add("observation", `Observații · ${item.competency}${groupKey ? ` · ${groupLabel}` : ""}`, { item, templateIndex: 12 }));
@@ -485,7 +485,7 @@ function slideValues(item, payload) {
   if (["range", "ranking"].includes(item.family)) return [item.title, ...(item.items || []).map((entry) => `${entry.competency}: ${entry.mean?.toFixed(2) || "—"}`)];
   if (item.family === "competency-distribution" && item.appendix) return [item.title, ...(item.items || []).map((record) => `${record.name}: ${record.scores?.[item.item.competency] ?? "—"}`)];
   if (item.family === "competency-distribution") return [item.title, ...(item.items || []).map((entry) => `${entry.competency}: ${entry.mean?.toFixed(2) || "—"}`)];
-  if (item.family === "benchmark") return [item.title, `Sub ${payload.bands.low}: ${payload.bands.below}`, `În interval: ${payload.bands.typical}`, `Peste ${payload.bands.high}: ${payload.bands.above}`];
+  if (item.family === "benchmark") { const bands = item.bands || payload.bands; return [item.title, `Sub ${bands.low}: ${bands.below}`, `În interval: ${bands.typical}`, `Peste ${bands.high}: ${bands.above}`]; }
   if (item.family === "zone") return [item.title, ...(item.items || []).map((entry) => `${entry.region}: ${entry.mean?.toFixed(2) || "—"}`)];
   if (item.family === "observation") return [item.title, `Medie ${item.item.mean?.toFixed(2) || "—"}`, `Mediană ${item.item.median?.toFixed(2) || "—"}`, `N ${item.item.n}`];
   if (item.family === "behavior") return [item.title, ...(item.insight?.key || []).map((row) => row.score2 || row.behavior), ...(item.insight?.development || []).map((row) => row.score0 || row.behavior)];
@@ -504,8 +504,8 @@ function fixedLabelsFor(item) {
 
 function textShape(role, value, y, size, color = "231F20") {
   const lines = String(value || "").split("\n");
-  const runs = lines.map((line, index) => `${index ? "<a:br/>" : ""}<a:r><a:rPr lang="ro-RO" sz="${size}"/><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:t>${xmlEscape(line)}</a:t></a:r>`).join("");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${90000 + y}" name="GRF-R role:${role}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="${y}"/><a:ext cx="16459200" cy="${role === "title" ? 700000 : 5900000}/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/><a:p>${runs}</a:p></p:txBody></p:sp>`;
+  const runs = lines.map((line, index) => `${index ? "<a:br/>" : ""}<a:r><a:rPr lang="ro-RO" sz="${size}" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="Poppins"/></a:rPr><a:t>${xmlEscape(line)}</a:t></a:r>`).join("");
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${90000 + y}" name="GRF-R role:${role}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="${y}"/><a:ext cx="16459200" cy="${role === "title" ? 700000 : 5900000}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"><a:spAutoFit/></a:bodyPr><a:lstStyle/><a:p><a:pPr marL="0" marR="0" lvl="0"><a:defRPr lang="ro-RO" sz="${size}"/><a:endParaRPr lang="ro-RO" sz="${size}" dirty="0"/></a:pPr>${runs}</a:p></p:txBody></p:sp>`;
 }
 function labelShape(labels) {
   return `<p:sp><p:nvSpPr><p:cNvPr id="99999" name="GRF-R fixed template labels"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="6500000"/><a:ext cx="16459200" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/><a:p><a:r><a:rPr lang="ro-RO" sz="900"/><a:t>${labels.map(xmlEscape).join(" • ")}</a:t></a:r></a:p></p:txBody></p:sp>`;
@@ -524,10 +524,25 @@ function renderSlide(item, payload, sourceXml) {
 }
 
 function chartSeriesFor(item, payload) {
-  if (item.family === "benchmark") return { categories: [`Sub ${payload.bands.low}`, `În intervalul ${payload.bands.low}–${payload.bands.high}`, `Peste ${payload.bands.high}`], series: [{ name: "Participanți", values: [payload.bands.below, payload.bands.typical, payload.bands.above] }] };
-  if (item.family === "zone") return { categories: (item.items || []).map((entry) => entry.region), series: [{ name: "Medie", values: (item.items || []).map((entry) => entry.mean ?? 0) }] };
+  if (item.family === "benchmark") { const bands = item.bands || payload.bands; return { categories: [`Sub ${bands.low}`, `În intervalul ${bands.low}–${bands.high}`, `Peste ${bands.high}`], series: [{ name: "Participanți", values: [bands.below, bands.typical, bands.above] }] }; }
+  if (item.family === "zone") {
+    const categories = [...new Set((item.items || []).map((entry) => entry.competency))];
+    const regions = [...new Set((item.items || []).map((entry) => entry.region))];
+    return { categories, series: regions.map((region) => ({ name: region, values: categories.map((competency) => (item.items || []).find((entry) => entry.region === region && entry.competency === competency)?.mean ?? 0) })) };
+  }
   if (item.family === "competency-distribution" && item.appendix) return { categories: (item.items || []).map((record) => record.name), series: [{ name: item.item.competency, values: (item.items || []).map((record) => record.scores?.[item.item.competency] ?? 0) }] };
-  if (["range", "ranking", "competency-distribution"].includes(item.family)) return { categories: (item.items || []).map((entry) => entry.competency), series: [{ name: "Medie", values: (item.items || []).map((entry) => entry.mean ?? 0) }] };
+  if (item.family === "range") return { categories: (item.items || []).map((entry) => entry.competency), series: [{ name: "Minim", values: (item.items || []).map((entry) => entry.min ?? 0) }, { name: "Mediană", values: (item.items || []).map((entry) => entry.median ?? 0) }, { name: "Maxim", values: (item.items || []).map((entry) => entry.max ?? 0) }] };
+  if (item.family === "ranking") return { categories: (item.items || []).map((entry) => entry.competency), series: [{ name: "Medie", values: (item.items || []).map((entry) => entry.mean ?? 0) }] };
+  if (item.family === "competency-distribution") {
+    const bands = item.bands || payload.bands;
+    const records = item.records || payload.records || [];
+    const categories = (item.items || []).map((entry) => entry.competency);
+    return { categories, series: [
+      { name: `Sub ${bands.low}`, values: categories.map((competency) => records.filter((record) => Number.isFinite(record.scores?.[competency]) && record.scores[competency] < bands.low).length) },
+      { name: `În interval`, values: categories.map((competency) => records.filter((record) => Number.isFinite(record.scores?.[competency]) && record.scores[competency] >= bands.low && record.scores[competency] <= bands.high).length) },
+      { name: `Peste ${bands.high}`, values: categories.map((competency) => records.filter((record) => Number.isFinite(record.scores?.[competency]) && record.scores[competency] > bands.high).length) }
+    ] };
+  }
   if (item.family === "behavior") { const rows = [...(item.insight?.key || []), ...(item.insight?.development || [])]; return { categories: rows.map((entry) => entry.behavior), series: [{ name: "Sumă scoruri", values: rows.map((entry) => entry.sum ?? 0) }] }; }
   const rows = payload.calculations.filter((entry) => entry.mean !== null);
   return { categories: rows.map((entry) => entry.competency), series: [{ name: "Medie", values: rows.map((entry) => entry.mean ?? 0) }] };
@@ -537,14 +552,18 @@ function cacheXml(kind, values) {
   return `<c:${kind}><c:ptCount val="${values.length}"/>${values.map((value, index) => `<c:pt idx="${index}"><c:v>${xmlEscape(numeric ? Number(value || 0).toFixed(4) : value)}</c:v></c:pt>`).join("")}</c:${kind}>`;
 }
 function refXml(kind, formula, values) { return `<c:${kind}Ref><c:f>${xmlEscape(formula)}</c:f>${cacheXml(kind === "str" ? "strCache" : "numCache", values)}</c:${kind}Ref>`; }
+function spreadsheetColumn(index) { let value = index + 1; let output = ""; while (value) { const remainder = (value - 1) % 26; output = String.fromCharCode(65 + remainder) + output; value = Math.floor((value - 1) / 26); } return output; }
 function updateChartXml(xml, data) {
   let seriesIndex = 0;
   return xml.replace(/<c:ser>[\s\S]*?<\/c:ser>/gu, (seriesXml) => {
-    const series = data.series[Math.min(seriesIndex, data.series.length - 1)] || { name: "Serie", values: [] };
+    const series = data.series[seriesIndex];
+    if (!series) return "";
     const end = Math.max(2, data.categories.length + 1);
-    let updated = seriesXml.replace(/<c:tx>[\s\S]*?<\/c:tx>/u, `<c:tx><c:v>${xmlEscape(series.name)}</c:v></c:tx>`);
+    let updated = seriesXml.replace(/<c:idx\b[^>]*\/>/u, `<c:idx val="${seriesIndex}"/>`).replace(/<c:order\b[^>]*\/>/u, `<c:order val="${seriesIndex}"/>`);
+    updated = updated.replace(/<c:tx>[\s\S]*?<\/c:tx>/u, `<c:tx><c:v>${xmlEscape(series.name)}</c:v></c:tx>`);
     updated = updated.replace(/<c:cat>[\s\S]*?<\/c:cat>/u, `<c:cat>${refXml("str", `Sheet1!$A$2:$A$${end}`, data.categories)}</c:cat>`);
-    updated = updated.replace(/<c:val>[\s\S]*?<\/c:val>/u, `<c:val>${refXml("num", `Sheet1!$${String.fromCharCode(66 + seriesIndex)}$2:$${String.fromCharCode(66 + seriesIndex)}$${end}`, series.values)}</c:val>`);
+    const column = spreadsheetColumn(seriesIndex + 1);
+    updated = updated.replace(/<c:val>[\s\S]*?<\/c:val>/u, `<c:val>${refXml("num", `Sheet1!$${column}$2:$${column}$${end}`, series.values)}</c:val>`);
     seriesIndex += 1;
     return updated;
   });
@@ -567,6 +586,22 @@ function relationshipTarget(source, target) {
   for (const part of parts) { if (part === "..") output.pop(); else if (part && part !== ".") output.push(part); }
   return output.join("/");
 }
+function normalizeSlideIdentity(xml, targetIndex) {
+  const creationId = String(1000000000 + targetIndex);
+  let shapeNumber = 0;
+  return xml.replace(/<p14:creationId\b([^>]*?)val="[^"]+"([^>]*)\/>/u, `<p14:creationId$1val="${creationId}"$2/>`).replace(/<a16:creationId\b([^>]*?)id="[^"]+"([^>]*)\/>/gu, () => {
+    const slide = targetIndex.toString(16).padStart(8, "0"); const shape = shapeNumber.toString(16).padStart(4, "0"); const tail = `${slide}${shapeNumber.toString(16).padStart(8, "0")}`.slice(-12); shapeNumber += 1;
+    return `<a16:creationId xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="{${slide}-${shape}-46C6-A399-${tail}}"/>`;
+  });
+}
+function normalizeChartIdentity(xml, chartNumber) {
+  let seriesNumber = 0;
+  return xml.replace(/<c16:uniqueId\b[^>]*val="[^"]+"[^>]*\/>/gu, () => {
+    const chart = chartNumber.toString(16).padStart(8, "0"); const series = seriesNumber.toString(16).padStart(4, "0"); const tail = `${chart}${seriesNumber.toString(16).padStart(8, "0")}`.slice(-12);
+    seriesNumber += 1;
+    return `<c16:uniqueId val="{${chart}-${series}-4000-8000-${tail}}"/>`;
+  });
+}
 async function packageGraph(zip) {
   const reachable = new Set(); const queue = ["ppt/presentation.xml"]; const dangling = [];
   if (zip.file("_rels/.rels")) for (const rel of relationshipTargets(await zip.file("_rels/.rels").async("string"))) { const target = relationshipTarget("_rels/.rels", rel.Target); if (target) queue.push(target); }
@@ -587,23 +622,29 @@ async function selfCheckPptx(zip) {
   for (const part of overrides) if (!zip.file(part)) errors.push(`content type points to missing ${part}`);
   const graph = await packageGraph(zip); errors.push(...graph.dangling.map((part) => `relationship points to missing ${part}`));
   for (const part of names.filter((name) => /^(ppt\/(slides|charts|embeddings)\/)/u.test(name))) if (!graph.reachable.has(part)) errors.push(`orphan package part ${part}`);
-  for (const entry of names) { if (/ppt\/fonts\//u.test(entry)) errors.push("ppt/fonts part present"); if (entry.endsWith(".xml")) { const xml = await zip.file(entry).async("string"); if (/<(?:p:|a:)[^>]*embeddedFontLst|<p:notesMasterIdLst/iu.test(xml)) errors.push(`forbidden IdLst entry in ${entry}`); } }
+  const creationIds = new Set(); const shapeCreationIds = new Set();
+  for (const entry of names) { if (/ppt\/fonts\//u.test(entry)) errors.push("ppt/fonts part present"); if (entry.endsWith(".xml")) { const xml = await zip.file(entry).async("string"); if (/<(?:p:|a:)[^>]*embeddedFontLst|<p:notesMasterIdLst/iu.test(xml)) errors.push(`forbidden IdLst entry in ${entry}`); if (/^ppt\/slides\/slide\d+\.xml$/u.test(entry)) { const shapeIds = [...xml.matchAll(/<p:cNvPr\b[^>]*\bid="([^"]+)"/gu)].map((match) => match[1]); if (shapeIds.length !== new Set(shapeIds).size) errors.push(`duplicate shape id in ${entry}`); for (const id of xml.matchAll(/<p14:creationId\b[^>]*val="([^"]+)"/gu)) if (creationIds.has(id[1])) errors.push(`duplicate slide creation id ${id[1]}`); else creationIds.add(id[1]); for (const id of xml.matchAll(/<a16:creationId\b[^>]*id="([^"]+)"/gu)) if (shapeCreationIds.has(id[1])) errors.push(`duplicate shape creation id ${id[1]}`); else shapeCreationIds.add(id[1]); } } }
   if (errors.length) throw new Error(`PPTX self-check failed: ${errors.join("; ")}`);
   return { ok: true, parts: names.length, reachable: graph.reachable.size };
 }
 
-async function cloneSlide(zip, sourceIndex, targetIndex, chartOffset, embeddingOffset, sourceSlides) {
+async function cloneSlide(zip, sourceIndex, targetIndex, chartOffset, embeddingOffset, sourceSlides, sourceCharts, sourceChartRels, sourceEmbeddings, sourceParts) {
   const sourceSlide = sourceSlides.get(sourceIndex); const sourceRels = sourceSlides.get(`${sourceIndex}.rels`); let nextChart = chartOffset; let nextEmbedding = embeddingOffset; let rels = sourceRels;
   for (const match of sourceRels.matchAll(/<Relationship\b[^>]*Target="\.\.\/charts\/chart(\d+)\.xml"[^>]*\/>/gu)) {
     const originalChart = Number(match[1]); nextChart += 1;
-    const chartFile = zip.file(`ppt/charts/chart${originalChart}.xml`);
-    if (!chartFile) throw new Error(`Template chart${originalChart}.xml is missing while cloning slide${sourceIndex}.xml.`);
-    const chartXml = await chartFile.async("string"); const chartRelsName = `ppt/charts/_rels/chart${originalChart}.xml.rels`;
-    let chartRels = zip.file(chartRelsName) ? await zip.file(chartRelsName).async("string") : `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
-    for (const embed of chartRels.matchAll(/Target="\.\.\/embeddings\/([^"]+\.xlsx)"/gu)) { const originalEmbedding = `ppt/embeddings/${embed[1]}`; const newEmbedding = `Microsoft_Excel_Worksheet${nextEmbedding ? nextEmbedding : ""}.xlsx`; nextEmbedding += 1; zip.file(`ppt/embeddings/${newEmbedding}`, await zip.file(originalEmbedding).async("uint8array")); chartRels = chartRels.replaceAll(`../embeddings/${embed[1]}`, `../embeddings/${newEmbedding}`); }
+    const chartXmlSource = sourceCharts.get(originalChart);
+    if (!chartXmlSource) throw new Error(`Template chart${originalChart}.xml is missing while cloning slide${sourceIndex}.xml.`);
+    const chartXml = normalizeChartIdentity(chartXmlSource, nextChart); let chartRels = sourceChartRels.get(originalChart) || `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+    for (const related of relationshipTargets(chartRels).filter((entry) => /\/(?:chartStyle|chartColorStyle|themeOverride)$/u.test(entry.Type))) {
+      const originalPart = relationshipTarget(`ppt/charts/chart${originalChart}.xml`, related.Target); const sourceBytes = originalPart ? sourceParts.get(originalPart) : null;
+      if (!originalPart || !sourceBytes) throw new Error(`Template chart support part ${originalPart || related.Target} is missing while cloning chart${originalChart}.xml.`);
+      const directory = originalPart.split("/").slice(0, -1).join("/"); const filename = originalPart.split("/").at(-1).replace(/\.xml$/u, `-chart${nextChart}.xml`); const newPart = `${directory}/${filename}`; const newTarget = directory === "ppt/theme" ? `../theme/${filename}` : filename;
+      zip.file(newPart, sourceBytes); chartRels = chartRels.replace(`Target="${related.Target}"`, `Target="${newTarget}"`);
+    }
+    for (const embed of chartRels.matchAll(/Target="\.\.\/embeddings\/([^"]+\.xlsx)"/gu)) { const originalEmbedding = `ppt/embeddings/${embed[1]}`; const newEmbedding = `Microsoft_Excel_Worksheet${nextEmbedding ? nextEmbedding : ""}.xlsx`; nextEmbedding += 1; const embeddingBytes = sourceEmbeddings.get(originalEmbedding); if (!embeddingBytes) throw new Error(`Template ${originalEmbedding} is missing while cloning chart${originalChart}.xml.`); zip.file(`ppt/embeddings/${newEmbedding}`, embeddingBytes); chartRels = chartRels.replaceAll(`../embeddings/${embed[1]}`, `../embeddings/${newEmbedding}`); }
     zip.file(`ppt/charts/chart${nextChart}.xml`, chartXml); zip.file(`ppt/charts/_rels/chart${nextChart}.xml.rels`, chartRels); rels = rels.replace(`../charts/chart${originalChart}.xml`, `../charts/chart${nextChart}.xml`);
   }
-  zip.file(slideName(targetIndex), sourceSlide); zip.file(slideRelsName(targetIndex), rels); return { chartOffset: nextChart, embeddingOffset: nextEmbedding };
+  zip.file(slideName(targetIndex), normalizeSlideIdentity(sourceSlide, targetIndex)); zip.file(slideRelsName(targetIndex), rels); return { chartOffset: nextChart, embeddingOffset: nextEmbedding };
 }
 async function updateCharts(zip, plan, payload) {
   for (const [index, item] of plan.entries()) { const rels = await zip.file(slideRelsName(index + 1)).async("string"); const data = chartSeriesFor(item, payload); for (const rel of relationshipTargets(rels).filter((entry) => entry.Type === `${relsType}chart`)) { const chartPath = relationshipTarget(slideName(index + 1), rel.Target); if (!chartPath || !zip.file(chartPath)) continue; zip.file(chartPath, updateChartXml(await zip.file(chartPath).async("string"), data)); const chartRelsPath = `${chartPath.split("/").slice(0, -1).join("/")}/_rels/${chartPath.split("/").at(-1)}.rels`; const chartRels = zip.file(chartRelsPath) ? await zip.file(chartRelsPath).async("string") : ""; const workbookRel = relationshipTargets(chartRels).find((entry) => entry.Type === `${relsType}package`); if (workbookRel) await updateEmbeddedWorkbook(zip, relationshipTarget(chartPath, workbookRel.Target), data); } }
@@ -619,26 +660,69 @@ async function prunePackage(zip) {
 }
 async function rebuildSlides(zip, plan, payload) {
   const sourceSlides = new Map(); for (const index of allSlideNumbers(zip)) { sourceSlides.set(index, await zip.file(slideName(index)).async("string")); sourceSlides.set(`${index}.rels`, await zip.file(slideRelsName(index)).async("string")); zip.remove(slideName(index)); zip.remove(slideRelsName(index)); }
+  const sourceCharts = new Map(); const sourceChartRels = new Map(); for (const index of allChartNumbers(zip)) { sourceCharts.set(index, await zip.file(`ppt/charts/chart${index}.xml`).async("string")); const relsName = `ppt/charts/_rels/chart${index}.xml.rels`; if (zip.file(relsName)) sourceChartRels.set(index, await zip.file(relsName).async("string")); }
+  const sourceEmbeddings = new Map(); for (const name of Object.keys(zip.files).filter((entry) => /^ppt\/embeddings\/.*\.xlsx$/u.test(entry))) sourceEmbeddings.set(name, await zip.file(name).async("uint8array"));
+  const sourceParts = new Map(); for (const name of Object.keys(zip.files).filter((entry) => /^ppt\/(?:charts|theme)\/.*\.xml$/u.test(entry))) sourceParts.set(name, await zip.file(name).async("uint8array"));
   let chartOffset = 0; let embeddingOffset = 0;
-  for (const [index, item] of plan.entries()) { const sourceIndex = sourceSlides.has(item.templateIndex) ? item.templateIndex : 2; const clone = await cloneSlide(zip, sourceIndex, index + 1, chartOffset, embeddingOffset, sourceSlides); chartOffset = clone.chartOffset; embeddingOffset = clone.embeddingOffset; zip.file(slideName(index + 1), renderSlide(item, payload, await zip.file(slideName(index + 1)).async("string"))); }
+  for (const [index, item] of plan.entries()) { const sourceIndex = sourceSlides.has(item.templateIndex) ? item.templateIndex : 2; const clone = await cloneSlide(zip, sourceIndex, index + 1, chartOffset, embeddingOffset, sourceSlides, sourceCharts, sourceChartRels, sourceEmbeddings, sourceParts); chartOffset = clone.chartOffset; embeddingOffset = clone.embeddingOffset; zip.file(slideName(index + 1), renderSlide(item, payload, await zip.file(slideName(index + 1)).async("string"))); }
   const presentation = await zip.file("ppt/presentation.xml").async("string"); const relsPath = "ppt/_rels/presentation.xml.rels"; let rels = await zip.file(relsPath).async("string"); rels = rels.replace(/<Relationship\b[^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/slide"[^>]*\/>/gu, ""); const nextRel = Math.max(0, ...[...rels.matchAll(/Id="rId(\d+)"/gu)].map((match) => Number(match[1]))) + 1; const slideRelationships = plan.map((_, index) => `<Relationship Id="rId${nextRel + index}" Type="${relsType}slide" Target="slides/slide${index + 1}.xml"/>`).join(""); rels = rels.replace("</Relationships>", `${slideRelationships}</Relationships>`); const slideIds = plan.map((_, index) => `<p:sldId id="${256 + index}" r:id="rId${nextRel + index}"/>`).join(""); zip.file(relsPath, rels); zip.file("ppt/presentation.xml", presentation.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/u, `<p:sldIdLst>${slideIds}</p:sldIdLst>`)); await updateCharts(zip, plan, payload); await prunePackage(zip);
 }
 async function generateTrendPptx(payload, { scope = "whole" } = {}) { if (!window.JSZip) throw new Error("Lipsește biblioteca locală pentru pachetul PPTX."); const zip = await window.JSZip.loadAsync(await templateBytes()); const plan = reportPlan(payload, { scope }); await rebuildSlides(zip, plan, payload); await selfCheckPptx(zip); return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", compression: "DEFLATE" }); }
 
 function itemText(item, payload) { return slideValues(item, payload).filter((value) => value !== undefined && value !== null && String(value).trim()).slice(0, 8).join(" · "); }
 async function fontPath() { if (!window.opentype) throw new Error("Lipsește opentype.js vendorizat."); const bytes = await fontBytes(); const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); return window.opentype.parse(buffer); }
-function svgItem(item, payload, index, font) { const title = String(item.title || ""); const body = itemText(item, payload); const accent = index % 2 ? "09BAD2" : "39B54A"; const pathFor = (value, x, y, size) => font.getPath(value, x, y, size).toPathData(2); return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" data-font="Poppins" data-text-outlined="true"><rect width="1600" height="900" fill="#231F20"/><rect x="0" y="0" width="1600" height="36" fill="#${accent}"/><rect x="96" y="112" width="1408" height="660" rx="24" fill="#ffffff"/><path d="${pathFor(title, 140, 208, 42)}" fill="#231F20"/><path d="${pathFor(body, 140, 300, 28)}" fill="#231F20"/></svg>`; }
+function wrapText(font, value, size, maxWidth) {
+  const output = [];
+  for (const paragraph of String(value || "").split("\n")) {
+    const words = paragraph.split(/\s+/u).filter(Boolean);
+    if (!words.length) { output.push(""); continue; }
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (!line || font.getAdvanceWidth(candidate, size) <= maxWidth) { line = candidate; continue; }
+      output.push(line);
+      line = word;
+    }
+    if (line) output.push(line);
+  }
+  return output;
+}
+function outlinedLines(font, value, x, y, size, maxWidth, lineHeight, fill = "#231F20") {
+  return wrapText(font, value, size, maxWidth).map((line, index) => `<path d="${font.getPath(line, x, y + index * lineHeight, size).toPathData(2)}" fill="${fill}"/>`).join("");
+}
+function svgItem(item, payload, index, font) {
+  const title = String(item.title || ""); const body = itemText(item, payload); const accent = index % 2 ? "09BAD2" : "39B54A";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" data-font="Poppins" data-text-outlined="true"><rect width="1600" height="900" fill="#231F20"/><rect x="0" y="0" width="1600" height="36" fill="#${accent}"/><rect x="96" y="112" width="1408" height="660" rx="24" fill="#ffffff"/>${outlinedLines(font, title, 140, 208, 42, 1320, 54)}${outlinedLines(font, body, 140, 300, 28, 1320, 40)}</svg>`;
+}
 async function pngFromSvg(svg) { const image = new Image(); const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url; }); const canvas = document.createElement("canvas"); canvas.width = 1600; canvas.height = 900; canvas.getContext("2d").drawImage(image, 0, 0); return canvas.toDataURL("image/png").split(",")[1]; }
 const pdfHex = (value) => [...String(value || "")].map((character) => character.codePointAt(0).toString(16).padStart(4, "0")).join("");
-async function buildBundleArtifacts(XLSX, payload) { const font = await fontPath(); const rawFont = await fontBytes(); const plan = reportPlan(payload, { scope: "whole" }).filter((item) => !["cover", "close"].includes(item.family)); const manifest = []; const pdfItems = []; const svg = []; for (const [index, item] of plan.entries()) { const id = String(index + 1).padStart(3, "0"); const sourceValues = slideValues(item, payload).filter((value) => value !== undefined && value !== null).map(String); svg.push({ name: `SVG/${id}-${id}.svg`, content: svgItem(item, payload, index, font) }); manifest.push({ id, title: item.title, group: item.groupKey || "whole-project", sourceValues }); pdfItems.push({ title: item.title, text: itemText(item, payload) }); } const workbook = XLSX.utils.book_new(); for (const item of manifest) XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Item", "Titlu", "Grup", "Valori"], [item.id, item.title, item.group, item.sourceValues.join(" · ")]]), `Item-${item.id}`); return { manifest: { version: "AC-GRF-R-1.0", bijection: true, items: manifest }, svg, workbookBytes: XLSX.write(workbook, { type: "array", bookType: "xlsx", compression: true }), pdfBytes: makePdf(pdfItems, rawFont) }; }
+async function buildBundleArtifacts(XLSX, payload) { const font = await fontPath(); const rawFont = await fontBytes(); const plan = reportPlan(payload, { scope: "whole" }).filter((item) => !["cover", "close"].includes(item.family)); const manifest = []; const pdfItems = []; const svg = []; for (const [index, item] of plan.entries()) { const id = String(index + 1).padStart(3, "0"); const sourceValues = slideValues(item, payload).filter((value) => value !== undefined && value !== null).map(String); svg.push({ name: `SVG/${id}-${id}.svg`, content: svgItem(item, payload, index, font) }); manifest.push({ id, title: item.title, group: item.groupKey || "whole-project", sourceValues }); pdfItems.push({ title: item.title, text: itemText(item, payload), font }); } const workbook = XLSX.utils.book_new(); for (const item of manifest) XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Item", "Titlu", "Grup", "Valori"], [item.id, item.title, item.group, item.sourceValues.join(" · ")]]), `Item-${item.id}`); return { manifest: { version: "AC-GRF-R-1.0", bijection: true, items: manifest }, svg, workbookBytes: XLSX.write(workbook, { type: "array", bookType: "xlsx", compression: true }), pdfBytes: makePdf(pdfItems, rawFont, font) }; }
 async function generateBundle(payload) { if (!window.JSZip || !window.XLSX) throw new Error("Lipsește biblioteca locală pentru bundle."); const artifacts = await buildBundleArtifacts(window.XLSX, payload); const zip = new window.JSZip(); for (const item of artifacts.svg) zip.file(item.name, item.content); const plan = reportPlan(payload, { scope: "whole" }).filter((item) => !["cover", "close"].includes(item.family)); for (const [index, item] of plan.entries()) zip.file(`PNG/${String(index + 1).padStart(3, "0")}-${String(index + 1).padStart(3, "0")}.png`, await pngFromSvg(artifacts.svg[index].content), { base64: true }); zip.file("data.xlsx", artifacts.workbookBytes); zip.file("manifest.json", JSON.stringify(artifacts.manifest, null, 2)); zip.file("01-report-items.pdf", artifacts.pdfBytes); return zip.generateAsync({ type: "blob", mimeType: "application/zip", compression: "DEFLATE" }); }
 function downloadBlob(blob, filename) { const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 async function downloadTrendPptx(payload, options) { downloadBlob(await generateTrendPptx(payload, options), "trend-group-report.pptx"); }
 async function downloadBundle(payload) { downloadBlob(await generateBundle(payload), "bhb-report-bundle.zip"); }
-function makePdf(items, font) {
+function pdfNumber(value) { return Number(value || 0).toFixed(2); }
+function pdfOutlinedLines(font, value, x, y, size, maxWidth, lineHeight) {
+  const commands = [];
+  for (const [lineIndex, line] of wrapText(font, value, size, maxWidth).entries()) {
+    let currentX = 0; let currentY = 0;
+    for (const command of font.getPath(line, x, y + lineIndex * lineHeight, size).commands) {
+      if (command.type === "M") { currentX = command.x; currentY = command.y; commands.push(`${pdfNumber(currentX)} ${pdfNumber(900 - currentY)} m`); }
+      else if (command.type === "L") { currentX = command.x; currentY = command.y; commands.push(`${pdfNumber(currentX)} ${pdfNumber(900 - currentY)} l`); }
+      else if (command.type === "C") { currentX = command.x; currentY = command.y; commands.push(`${pdfNumber(command.x1)} ${pdfNumber(900 - command.y1)} ${pdfNumber(command.x2)} ${pdfNumber(900 - command.y2)} ${pdfNumber(currentX)} ${pdfNumber(900 - currentY)} c`); }
+      else if (command.type === "Q") {
+        const endX = command.x; const endY = command.y;
+        commands.push(`${pdfNumber(currentX + (2 / 3) * (command.x1 - currentX))} ${pdfNumber(900 - (currentY + (2 / 3) * (command.y1 - currentY)))} ${pdfNumber(endX + (2 / 3) * (command.x1 - endX))} ${pdfNumber(900 - (endY + (2 / 3) * (command.y1 - endY)))} ${pdfNumber(endX)} ${pdfNumber(900 - endY)} c`);
+        currentX = endX; currentY = endY;
+      } else if (command.type === "Z") commands.push("h");
+    }
+  }
+  return commands.join(" ");
+}
+function makePdf(items, rawFont, font) {
   const objects = [];
   const add = (value) => { objects.push(value); return objects.length; };
-  const fontFile = add({ stream: font, dict: `<< /Length ${font.length} /Length1 ${font.length} >>` });
+  const fontFile = add({ stream: rawFont, dict: `<< /Length ${rawFont.length} /Length1 ${rawFont.length} >>` });
   const descriptor = add(`<< /Type /FontDescriptor /FontName /Poppins /Flags 4 /FontBBox [0 -200 1200 1000] /ItalicAngle 0 /Ascent 1000 /Descent -250 /CapHeight 700 /StemV 80 /FontFile2 ${fontFile} 0 R >>`);
   const cid = add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Poppins /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${descriptor} 0 R /CIDToGIDMap /Identity >>`);
   const cmapText = `/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Poppins-UTF16 def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <ffff>\nendcodespacerange\n1 beginbfrange\n<0000> <ffff> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`;
@@ -648,10 +732,12 @@ function makePdf(items, font) {
   const pages = add("");
   const pageIds = [];
   for (const item of items) {
-    const content = `BT /F1 24 Tf 48 720 Td <${pdfHex(item.title)}> Tj 0 -42 Td /F1 12 Tf <${pdfHex(item.text)}> Tj ET`;
+    const titlePath = pdfOutlinedLines(font, item.title, 140, 208, 42, 1320, 54);
+    const bodyPath = pdfOutlinedLines(font, item.text, 140, 300, 28, 1320, 40);
+    const content = `q 0.137 0.122 0.125 rg 0 0 1600 900 re f 0.224 0.706 0.294 rg 0 864 1600 36 re f 1 1 1 rg 96 128 1408 660 re f 0.137 0.122 0.125 rg ${titlePath} ${bodyPath} f Q`;
     const contentBytes = new TextEncoder().encode(content);
     const contentId = add({ stream: contentBytes, dict: `<< /Length ${contentBytes.length} >>` });
-    pageIds.push(add(`<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 792 612] /Resources << /Font << /F1 ${type0} 0 R >> >> /Contents ${contentId} 0 R >>`));
+    pageIds.push(add(`<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 1600 900] /Resources << /Font << /F1 ${type0} 0 R >> >> /Contents ${contentId} 0 R >>`));
   }
   objects[pages - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
   const catalog = add(`<< /Type /Catalog /Pages ${pages} 0 R >>`);
@@ -667,7 +753,10 @@ function makePdf(items, font) {
   });
   const xref = length;
   chunks.push(new TextEncoder().encode(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF`));
-  return chunks.reduce((all, chunk) => new Uint8Array([...all, ...chunk]), new Uint8Array());
+  const output = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.length; }
+  return output;
 }
 
 Object.assign(window.__grf||(window.__grf={}),{downloadBundle,downloadTrendPptx,generateBundle,generateTrendPptx});})();
