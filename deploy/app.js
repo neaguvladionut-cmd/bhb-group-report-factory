@@ -372,10 +372,11 @@ function rankBehaviors(rows = []) {
     if (ranked.length >= 10) { keyCount = 5; developmentCount = 5; }
     else if (ranked.length >= 6) { keyCount = 3; developmentCount = 3; }
     else {
-      const medianIndex = Math.floor(ranked.length / 2);
-      medianBehavior = ranked[medianIndex] || null;
-      keyCount = medianIndex;
-      developmentCount = Math.max(0, ranked.length - medianIndex - 1);
+      // Below 6 (Vlad, 2026-10-01): an even count splits exactly in half; an odd count skips the middle behaviour.
+      const half = Math.floor(ranked.length / 2);
+      medianBehavior = ranked.length % 2 ? ranked[half] : null;
+      keyCount = half;
+      developmentCount = half;
     }
     const key = ranked.slice(0, keyCount);
     const development = ranked.slice(ranked.length - developmentCount);
@@ -422,13 +423,17 @@ function methodologyColumns(payload) {
     { number: String((payload.behaviorAggregates || []).length), text: "comportamente specifice observate" },
     { number: exerciseCount, text: `exerciții concepute pentru a evidenția nivelul competențelor evaluate${exerciseList ? `: ${exerciseList}` : ""}` }
   ];
+  // A fact the consultant left empty is omitted, never printed as a number-less sentence (ruling 2026-10-01).
+  const missing = { evaluators: !consultants, days: !days, exercises: !exerciseCount };
+  for (let index = facts.length - 1; index >= 1; index -= 1) if (!facts[index].number) facts.splice(index, 1);
   if (text(metadata.otherInstruments)) facts.push({ number: "", text: `Alte instrumente folosite: ${text(metadata.otherInstruments)}` });
   const principles = text(metadata.methodologyText) ? text(metadata.methodologyText).split(/\n+/u).map(text).filter(Boolean) : METHODOLOGY_PRINCIPLES;
   const line = (fact) => `${fact.number ? `${fact.number} ` : ""}${fact.text}`;
   return {
     facts, principles,
     left: ["METODOLOGIE", ...facts.map(line)], right: ["PROCESUL DE EVALUARE", ...principles],
-    missing: { evaluators: !consultants, days: !days, exercises: !exerciseCount && !exerciseList, otherInstruments: !text(metadata.otherInstruments) }
+    missing: { ...missing, otherInstruments: !text(metadata.otherInstruments) },
+    missingLabels: [missing.evaluators && "consultanți TREND implicați", missing.days && "zile de evaluare", missing.exercises && "număr de exerciții"].filter(Boolean)
   };
 }
 const methodologyPages = (payload) => [{ page: methodologyColumns(payload) }];
@@ -451,7 +456,7 @@ function executiveSummary(payload) {
   };
 }
 
-const behaviourLine = (row, field, share) => `${text(row[field]) || row.behavior} (${Math.round((share || 0) * 100)} %)`;
+const behaviourLine = (row, field, share) => `${text(row[field]) || row.behavior} (${Math.round((share || 0) * 100)}%)`;
 function competencyFindings(payload) {
   const insights = new Map(behaviorInsights(payload.behaviorAggregates || []).map((item) => [item.competency, item]));
   const { low, high } = payload.bands;
@@ -724,7 +729,7 @@ function textHeightNeeded(shapeXml, scale = 1, widthEmu = null, spacing = 1) {
     const content = runTexts(paragraph).join("").replace(/&[a-z]+;/gu, "x");
     const usable = Math.max(1, (width - margin) / 12700); // points
     const rPrs = runRPrs(paragraph); const letterSpacing = Math.max(0, ...rPrs.map((rPr) => Number(rPr.match(/\sspc="(-?\d+)"/u)?.[1] || 0))) / 100 * scale;
-    const charWidth = size * (rPrs.some((rPr) => /\sb="1"/u.test(rPr)) ? 0.57 : 0.53) + letterSpacing;
+    const charWidth = size * (rPrs.some((rPr) => /\sb="1"/u.test(rPr)) ? 0.55 : 0.5) + letterSpacing;
     let lines = 0;
     for (const part of content.split("\t").join("    ").split("\n")) {
       let line = 0; lines += 1;
@@ -752,30 +757,68 @@ function groupScale(xml, id) {
   }
   return { scaleX, scaleY };
 }
-function fitText(shapeXml, { minScale = 0.7, height = null, scaleX = 1, scaleY = 1 } = {}) {
-  const geometry = xfrmOf(shapeXml); if (!geometry) return shapeXml;
-  const available = (height ?? geometry.cy) * scaleY;
-  const width = geometry.cx * scaleX;
-  const textHeightNeeded_ = textHeightNeeded;
-  const textHeightNeeded__ = (xml, scale, ignored, spacing = 1) => textHeightNeeded_(xml, scale, width, spacing);
-  if (textHeightNeeded__(shapeXml, 1) <= available) return shapeXml;
+/** Multiply every explicit run size of a shape's text by `scale` (1/100 pt, rounded to 0.5 pt). */
+function scaleRunSizes(shapeXml, scale, { baseSize = 1800 } = {}) {
+  if (scale >= 0.999) return shapeXml;
+  const range = txBodyRange(shapeXml); const body = shapeXml.slice(range.open, range.close);
+  const scaled = body.replace(/<a:(rPr|endParaRPr)\b([^>]*?)(\/?)>/gu, (whole, tag, attrs, slash) => {
+    const size = Number(attrs.match(/\ssz="(\d+)"/u)?.[1] || baseSize);
+    const next = Math.max(100, Math.round(size * scale / 50) * 50);
+    return `<a:${tag}${attrs.replace(/\ssz="\d+"/u, "")} sz="${next}"${slash}>`;
+  });
+  return `${shapeXml.slice(0, range.open)}${scaled}${shapeXml.slice(range.close)}`;
+}
+const largestRunSize = (shapeXml) => Math.max(0, ...[...shapeXml.matchAll(/<a:rPr\b[^>]*\ssz="(\d+)"/gu)].map((match) => Number(match[1])));
+/**
+ * Rule 7 as ruled 2026-10-01: text that exceeds its shape gets EXPLICIT run sizes (same in PowerPoint and
+ * LibreOffice), stepping down until it fits; body text never below `minPoints` (10 pt), titles never below
+ * `minScale` of the template size. Returns {xml, fits, scale}.
+ */
+function fitTextSized(shapeXml, { minScale = 0, minPoints = 10, height = null, scaleX = 1, scaleY = 1 } = {}) {
+  const geometry = xfrmOf(shapeXml); if (!geometry) return { xml: shapeXml, fits: true, scale: 1 };
+  const available = (height ?? geometry.cy) * scaleY; const width = geometry.cx * scaleX;
+  const need = (scale) => textHeightNeeded(shapeXml, scale, width);
+  if (need(1) <= available) return { xml: shapeXml, fits: true, scale: 1 };
+  const largest = largestRunSize(shapeXml) || 1800;
+  const floor = Math.max(minScale, minPoints * 100 / largest);
   let scale = 1;
-  while (scale > minScale && textHeightNeeded__(shapeXml, scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  while (scale - 0.025 >= floor - 1e-9 && need(scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  if (need(scale) > available) scale = Math.min(scale, Math.max(floor, 0));
+  const xml = setAutofit(scaleRunSizes(shapeXml, scale), "");
+  return { xml, fits: textHeightNeeded(xml, 1, width) <= available, scale };
+}
+function fitText(shapeXml, options = {}) { return fitTextSized(shapeXml, options).xml; }
+/** Width (EMU) the text of one paragraph needs on a single line at the given scale. */
+function singleLineWidth(paragraphXml, scale = 1) {
+  let width = 0;
+  for (const match of paragraphXml.matchAll(/<a:r>\s*(<a:rPr\b[^>]*\/>|<a:rPr\b[^>]*>[\s\S]*?<\/a:rPr>)?[\s\S]*?<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)) {
+    const rPr = match[1] || ""; const size = Number(rPr.match(/\ssz="(\d+)"/u)?.[1] || 1800) / 100 * scale;
+    const spacing = Number(rPr.match(/\sspc="(-?\d+)"/u)?.[1] || 0) / 100 * scale;
+    const chars = match[2].replace(/&[a-z]+;/gu, "x").length;
+    width += chars * (size * (/\sb="1"/u.test(rPr) ? 0.55 : 0.5) + spacing);
+  }
+  return width * 12700;
+}
+/** A title on ONE line by explicit run size (down to minScale); else two lines at minScale. */
+function fitTitleOneLine(shapeXml, { minScale = 0.6, scaleX = 1 } = {}) {
+  const geometry = xfrmOf(shapeXml); const bodyPr = bodyPrOf(shapeXml);
+  // 10 % reserve: renderers substitute fonts of different widths; a one-line title must stay on one line in both.
+  const usable = (geometry.cx * scaleX - insetOf(bodyPr, "lIns", 91440) - insetOf(bodyPr, "rIns", 91440)) * 0.9;
+  const paragraph = paragraphsOf(shapeXml)[0] || "";
+  let scale = 1;
+  while (scale > minScale && singleLineWidth(paragraph, scale) > usable) scale = Math.round((scale - 0.025) * 1000) / 1000;
   scale = Math.max(minScale, scale);
-  // Still too tall at the 70 % floor: let PowerPoint also reduce line spacing (up to 20 %), as its own autofit does.
-  let reduction = 0;
-  while (reduction < 0.2 && textHeightNeeded__(shapeXml, scale, null, 1 - reduction) > available) reduction = Math.round((reduction + 0.05) * 100) / 100;
-  return setAutofit(shapeXml, `<a:normAutofit fontScale="${Math.round(scale * 100000)}"${reduction ? ` lnSpcReduction="${Math.round(reduction * 100000)}"` : ""}/>`);
+  const lines = singleLineWidth(paragraph, scale) > usable ? 2 : 1;
+  return { xml: setAutofit(scaleRunSizes(shapeXml, scale), ""), lines, scale, lineHeight: largestRunSize(shapeXml) / 100 * scale * 1.2 * 12700 };
 }
 function setAutofit(shapeXml, autofit) {
   const bodyPr = bodyPrOf(shapeXml);
   const open = bodyPr.match(/^<a:bodyPr\b[^>]*?(?=\/?>)/u)[0];
   let inner = bodyPr.endsWith("</a:bodyPr>") ? bodyPr.replace(/^<a:bodyPr\b[^>]*>/u, "").replace(/<\/a:bodyPr>$/u, "") : "";
-  inner = inner.replace(/<a:(?:spAutoFit|noAutofit|normAutofit)\b[^>]*\/>/gu, "").replace(/<a:normAutofit\b[^>]*>[\s\S]*?<\/a:normAutofit>/gu, "");
+  inner = autofit ? inner.replace(/<a:(?:spAutoFit|noAutofit|normAutofit)\b[^>]*\/>/gu, "").replace(/<a:normAutofit\b[^>]*>[\s\S]*?<\/a:normAutofit>/gu, "") : inner.replace(/<a:normAutofit\b[^>]*\/>|<a:normAutofit\b[^>]*>[\s\S]*?<\/a:normAutofit>/gu, "");
   const warp = inner.match(/^<a:prstTxWarp\b[\s\S]*?<\/a:prstTxWarp>/u)?.[0] || "";
   return shapeXml.replace(bodyPr, `${open}>${warp}${autofit}${inner.slice(warp.length)}</a:bodyPr>`);
 }
-function fontScaleOf(shapeXml) { const value = shapeXml.match(/<a:normAutofit fontScale="(\d+)"/u)?.[1]; return value ? Number(value) / 100000 : 1; }
 function setBodyInsets(shapeXml, insets) {
   return shapeXml.replace(/<a:bodyPr\b([^>]*?)(\/?)>/u, (whole, attrs, slash) => { let next = attrs; for (const [name, value] of Object.entries(insets)) { next = next.replace(new RegExp(`\\s${name}="[^"]*"`, "u"), ""); next += ` ${name}="${Math.round(value)}"`; } return `<a:bodyPr${next}${slash}>`; });
 }
@@ -913,7 +956,7 @@ function chartWorkbookRows(data) {
 
 // ---------- new shapes (fill map §1 „New”) ----------
 function newTextShape({ id, name, x, y, cx, cy, rPr, text: value, align = "l", anchor = "t", autofit = true }) {
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${NEW_SHAPE_PREFIX}${xmlEscape(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x)}" y="${Math.round(y)}"/><a:ext cx="${Math.round(cx)}" cy="${Math.round(cy)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" rtlCol="0" anchor="${anchor}">${autofit ? "<a:normAutofit/>" : "<a:noAutofit/>"}</a:bodyPr><a:lstStyle/><a:p><a:pPr algn="${align}"/>${run(rPr, value)}</a:p></p:txBody></p:sp>`;
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${NEW_SHAPE_PREFIX}${xmlEscape(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x)}" y="${Math.round(y)}"/><a:ext cx="${Math.round(cx)}" cy="${Math.round(cy)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" rtlCol="0" anchor="${anchor}"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="${align}"/>${run(rPr, value)}</a:p></p:txBody></p:sp>`;
 }
 function newRectShape({ id, name, x, y, cx, cy, fill }) {
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${NEW_SHAPE_PREFIX}${xmlEscape(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x)}" y="${Math.round(y)}"/><a:ext cx="${Math.round(cx)}" cy="${Math.round(cy)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:endParaRPr lang="ro-RO"/></a:p></p:txBody></p:sp>`;
@@ -928,10 +971,10 @@ function withoutBullet(style) {
   return { ...style, pPr };
 }
 
-Object.assign(window.__grf||(window.__grf={}),{EMU,NEW_SHAPE_PREFIX,xmlEscape,shapeRange,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,paragraphsOf,runRPrs,runTexts,setRPrAttr,setRPrColor,templateParagraphs,regularRPr,boldRPr,setParagraphs,appendToLastRun,setRunText,shapeText,textHeightNeeded,groupScale,fitText,setAutofit,fontScaleOf,setBodyInsets,visualBox,setVisualBox,moveBand,plotLayoutFromBand,setPlotLayout,tableRows,rowHeight,isShadedRow,setCellText,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,columnName,roundChartValue,fillChartXml,chartWorkbookRows,newTextShape,newRectShape,withoutBullet});})();
+Object.assign(window.__grf||(window.__grf={}),{EMU,NEW_SHAPE_PREFIX,xmlEscape,shapeRange,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,paragraphsOf,runRPrs,runTexts,setRPrAttr,setRPrColor,templateParagraphs,regularRPr,boldRPr,setParagraphs,appendToLastRun,setRunText,shapeText,textHeightNeeded,groupScale,scaleRunSizes,fitTextSized,fitText,singleLineWidth,fitTitleOneLine,setAutofit,setBodyInsets,visualBox,setVisualBox,moveBand,plotLayoutFromBand,setPlotLayout,tableRows,rowHeight,isShadedRow,setCellText,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,columnName,roundChartValue,fillChartXml,chartWorkbookRows,newTextShape,newRectShape,withoutBullet});})();
 
 (()=>{const {reportPlan,BUNDLE_FAMILIES,f2}=window.__grf;
-const {EMU,NEW_SHAPE_PREFIX,xmlEscape,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,setParagraphs,appendToLastRun,setRunText,templateParagraphs,regularRPr,boldRPr,setRPrAttr,setRPrColor,fitText,withoutBullet,setBodyInsets,moveBand,plotLayoutFromBand,visualBox,groupScale,tableRows,rowHeight,isShadedRow,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,fillChartXml,chartWorkbookRows,roundChartValue,newTextShape,newRectShape}=window.__grf;
+const {EMU,NEW_SHAPE_PREFIX,xmlEscape,getShape,updateShape,hasShape,hideShape,addToTree,xfrmOf,setXfrm,setParagraphs,appendToLastRun,setRunText,templateParagraphs,regularRPr,boldRPr,setRPrAttr,setRPrColor,fitText,withoutBullet,setBodyInsets,moveBand,plotLayoutFromBand,visualBox,groupScale,fitTitleOneLine,setVisualBox,tableRows,rowHeight,isShadedRow,setRowCells,setRowHeight,setRowId,replaceTableRows,rowLayout,placeBrace,fillChartXml,chartWorkbookRows,roundChartValue,newTextShape,newRectShape}=window.__grf;
 
 const TEMPLATE_PATH = "./assets/trend/template-raport-de-grup-RO.pptx";
 const FONT_PATH = "./assets/vendor/Poppins-Regular.ttf";
@@ -939,6 +982,7 @@ const relsType = "http://schemas.openxmlformats.org/officeDocument/2006/relation
 const asBytes = (base64) => typeof Buffer !== "undefined" ? Buffer.from(base64, "base64") : Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
 const slideName = (index) => `ppt/slides/slide${index}.xml`;
 const slideRelsName = (index) => `ppt/slides/_rels/slide${index}.xml.rels`;
+const TITLE_ACCENT = "D49802"; // t12 title competency run (orange)
 const NAVY = "003057"; const GREY = "A5A5A5"; const GOLD = "DBA900"; const SIXTH = "FF9D75";
 // Per-competency colours: the template's five series colours, then FF9D75 (DoD 6).
 const ZONE_CATEGORY_COLORS = ["003057", "4472C4", "00A19A", "DBA900", "545454", SIXTH];
@@ -997,8 +1041,32 @@ function columnLabelSize(rows) {
 // ---------------------------------------------------------------- slide fillers (fill map §1)
 const groupSuffix = (item) => item.suffix || "";
 const fill = (xml, id, paragraphs, options = {}) => { const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => { const filled = setParagraphs(shape, paragraphs, options); return options.fit === false ? filled : fitText(filled, scale); }); };
-const titleSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitText(appendToLastRun(shape, groupSuffix(item)), scale)); };
-const bandRange = (item) => ({ low: Number(item.low ?? 2.75), high: Number(item.high ?? 3.5) });
+const titleSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitTitleOneLine(appendToLastRun(shape, groupSuffix(item)), scale).xml); };
+const dividerSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitText(appendToLastRun(shape, groupSuffix(item)), { ...scale, minScale: 0.6, minPoints: 0 })); };
+/** Move shapes below a growing title down by `delta`, compressing them into the same bottom edge (tables scale their rows). */
+function compressBelow(xml, ids, delta) {
+  const boxes = ids.map((id) => visualBox(getShape(xml, id)));
+  const top = Math.min(...boxes.map((box) => box.y)); const bottom = Math.max(...boxes.map((box) => box.y + box.cy));
+  const k = (bottom - top - delta) / (bottom - top);
+  for (const id of ids) xml = updateShape(xml, id, (shape) => {
+    const box = visualBox(shape); let next = setVisualBox(shape, { ...box, y: top + delta + (box.y - top) * k, cy: box.cy * k });
+    if (/<a:tbl>/u.test(next)) next = next.replace(/(<a:tr\b[^>]*\bh=")(\d+)(")/gu, (whole, head, h, tail) => `${head}${Math.round(Number(h) * k)}${tail}`);
+    return next;
+  });
+  return xml;
+}
+/** M5/A4 title: navy „Distribuția pe competențe – ” + orange competency run, one line by explicit size (≥ 60 %). */
+function competencyTitle(xml, id, competency, suffix = "") {
+  let lines = 1; let lineHeight = 0; const scale = groupScale(xml, id);
+  xml = updateShape(xml, id, (shape) => {
+    const styles = templateParagraphs(shape)[0]; const base = styles.rPrs[0];
+    const baseColor = base.match(/<a:srgbClr val="(\w+)"/u)?.[1];
+    const accent = styles.rPrs.find((rPr) => (rPr.match(/<a:srgbClr val="(\w+)"/u)?.[1] || baseColor) !== baseColor) || setRPrColor(base, TITLE_ACCENT);
+    const fitted = fitTitleOneLine(setParagraphs(shape, [[{ text: "Distribuția pe competențe – ", rPr: base }, { text: `${competency}${suffix}`, rPr: accent }]]), scale);
+    lines = fitted.lines; lineHeight = fitted.lineHeight; return fitted.xml;
+  });
+  return { xml, lines, lineHeight };
+}const bandRange = (item) => ({ low: Number(item.low ?? 2.75), high: Number(item.high ?? 3.5) });
 function applyBand(xml, spec, item) {
   if (!spec?.band) return xml;
   const { low, high } = bandRange(item);
@@ -1015,7 +1083,7 @@ function fillCover(xml, item) {
   if (item.annexMark) xml = updateShape(xml, 12, (shape) => appendToLastRun(shape, " – Anexă"));
   const logo = xfrmOf(getShape(xml, 20));
   const style = setRPrColor(templateParagraphs(getShape(xml, 12))[0].rPrs[0], NAVY);
-  return addToTree(xml, newTextShape({ id: newId(), name: "confidential", x: logo.x, y: logo.y + logo.cy + 0.15 * EMU, cx: logo.cx, cy: 0.6 * EMU, rPr: style, text: "CONFIDENȚIAL", align: "ctr" }));
+  return addToTree(xml, fitTitleOneLine(newTextShape({ id: newId(), name: "confidential", x: logo.x, y: logo.y + logo.cy + 0.15 * EMU, cx: logo.cx, cy: 0.6 * EMU, rPr: style, text: "CONFIDENȚIAL", align: "ctr" }), { minScale: 0.5 }).xml);
 }
 function fillHowToRead(xml, item) {
   xml = updateShape(xml, 93, (shape) => setParagraphs(shape, [[{ text: item.title, run: 0 }]]));
@@ -1071,9 +1139,10 @@ function fillScoreTable(xml, tableId, values, bandsOf, low, high) {
 const bandOf = (low, high) => (value) => (value > high ? "above" : value < low ? "below" : "in");
 function fillKeyFindings(xml, item) {
   const { low, high } = bandRange(item);
-  xml = updateShape(xml, 21, (shape) => { const styles = templateParagraphs(shape)[0]; const accent = styles.rPrs.find((rPr, index) => index > 0 && /<a:solidFill>/u.test(rPr)) || styles.rPrs[1] || styles.rPrs[0]; return fitText(setParagraphs(shape, [[{ text: "Distribuția pe competențe – ", run: 0 }, { text: item.competency, rPr: accent }]])); });
-  const title = getShape(xml, 21); const titleBox = xfrmOf(title); const styles = templateParagraphs(title)[0];
-  const accent = styles.rPrs.find((rPr, index) => index > 0 && /<a:solidFill>/u.test(rPr)) || styles.rPrs[1] || styles.rPrs[0];
+  const title = competencyTitle(xml, 21, item.competency); xml = title.xml;
+  const shift = title.lines > 1 ? title.lineHeight : 0;
+  if (shift) xml = compressBelow(xml, [6, 19, 17, 20, 18], shift);
+  const titleBox = xfrmOf(getShape(xml, 21)); const accent = setRPrColor(templateParagraphs(getShape(xml, 21))[0].rPrs.at(-1), TITLE_ACCENT);
   const table = fillScoreTable(xml, 6, item.scores, bandOf(low, high), low, high); xml = table.xml;
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
@@ -1081,7 +1150,7 @@ function fillKeyFindings(xml, item) {
   xml = fill(xml, 17, item.strengths.length ? item.strengths : [""]);
   xml = fill(xml, 18, item.development.length ? item.development : [""]);
   const strengthsHeader = xfrmOf(getShape(xml, 19));
-  return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
+  return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU + shift, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
 }
 function fillBenchmark(xml, item) {
   const { low, high } = bandRange(item); const table = item.table;
@@ -1103,7 +1172,7 @@ function fillPopulation(xml, item) {
   return updateShape(xml, 26, (shape) => setRunText(shape, 3, benchmarkSentence(item)));
 }
 function fillBehavior(xml, item) {
-  xml = updateShape(xml, 3, (shape) => fitText(appendToLastRun(shape, ` ${item.competency}${groupSuffix(item)}`)));
+  xml = updateShape(xml, 3, (shape) => fitTitleOneLine(appendToLastRun(shape, ` ${item.competency}${groupSuffix(item)}`), { scaleX: 1 }).xml);
   const frame = getShape(xml, 7); const rows = tableRows(frame); const header = rows[0]; const bodyTemplate = rows[1];
   const bodyHeight = rows.slice(1).reduce((sum, row) => sum + rowHeight(row), 0);
   const count = Math.max(1, item.key.length, item.development.length);
@@ -1113,8 +1182,8 @@ function fillBehavior(xml, item) {
 function cellSize(item, count) {
   // Rule 5/7 for the behaviour table: the longest cell must fit its row (≈ 8.5 in wide); step down to 9 pt minimum.
   const rowPoints = 7.4 * 72 / count; const longest = Math.max(1, ...[...item.key, ...item.development].map((value) => value.length));
-  for (let size = 2000; size >= 900; size -= 100) { const charsPerLine = 8.4 * 72 / (size / 100 * 0.53); const lines = Math.ceil(longest / charsPerLine); if (lines * size / 100 * 1.25 + 8 <= rowPoints) return { size }; }
-  return { size: 900 };
+  for (let size = 2000; size >= 1000; size -= 100) { const charsPerLine = 8.4 * 72 / (size / 100 * 0.53); const lines = Math.ceil(longest / charsPerLine); if (lines * size / 100 * 1.25 + 8 <= rowPoints) return { size }; }
+  return { size: 1000 };
 }
 function fillConclusions(xml, item) {
   xml = titleSuffix(xml, 5, item);
@@ -1130,7 +1199,7 @@ function fillSlide(xml, item) {
     case "methodology": return fillMethodology(xml, item);
     case "executive-summary": return fillExecutiveSummary(xml, item);
     case "key-findings": return fillKeyFindings(xml, item);
-    case "divider-results": case "divider-behaviors": case "divider-conclusions": return titleSuffix(xml, 8, item);
+    case "divider-results": case "divider-behaviors": case "divider-conclusions": return dividerSuffix(xml, 8, item);
     case "range": return updateShape(titleSuffix(xml, 3, item), 26, (shape) => setRunText(shape, 3, benchmarkSentence(item)));
     case "ranking": case "zone": return titleSuffix(xml, 4, item);
     case "benchmark": return fillBenchmark(xml, item);
@@ -1139,7 +1208,7 @@ function fillSlide(xml, item) {
     case "conclusions": return fillConclusions(xml, item);
     case "appendix-divider": return fill(fill(xml, 8, [item.heading], { fit: false }), 9, [item.subheading], { fit: false });
     case "participant-mean": case "participant-comparison": return xml;
-    case "competency-participants": return updateShape(xml, 5, (shape) => fitText(appendToLastRun(shape, ` ${item.competency}`)));
+    case "competency-participants": { const title = competencyTitle(xml, 5, item.competency); return title.lines > 1 ? compressBelow(title.xml, [2, 3], title.lineHeight) : title.xml; }
     case "close": return xml;
     default: throw new Error(`No fill rule for plan family ${item.family}.`);
   }
@@ -1520,7 +1589,7 @@ function mountPreview(root,payload,options={}){const plan=reportPlan(payload,{sc
 
 Object.assign(window.__grf||(window.__grf={}),{mountPreview});})();
 
-(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,mountPreview,reportPlan}=window.__grf;
+(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,reportPlan}=window.__grf;
 if (!window.XLSX || !window.JSZip) throw new Error("Lipsesc bibliotecile locale necesare");
 
 let files = [];
@@ -1589,6 +1658,14 @@ function renderStructure() {
   const main = plan.filter((slide) => slide.deliverable !== "appendix");
   const appendix = plan.filter((slide) => slide.deliverable === "appendix");
   root.innerHTML = `<div class="structure-card"><strong>Trend · raport principal</strong><span>${main.length} slide-uri</span><small>Întregul proiect primul; grupurile CODE urmează doar când activezi împărțirea.</small></div><div class="structure-card"><strong>Anexă</strong><span>${appendix.length ? `${appendix.length} slide-uri` : "dezactivată"}</span><small>${payload.metadata.annex === "separate" ? "Se descarcă separat." : payload.metadata.annex === "none" ? "Nu se generează." : "Se include la final."}</small></div>`;
+  const missingMethodology = methodologyColumns(payload).missingLabels || [];
+  if (missingMethodology.length) {
+    const warning = document.createElement("p");
+    warning.className = "structure-card methodology-warning";
+    warning.setAttribute("role", "status");
+    warning.textContent = `Câmpuri de metodologie necompletate: ${missingMethodology.join(", ")}. Rândurile lor nu apar în raport până nu le completezi.`;
+    root.append(warning);
+  }
   if (payload.groups.length >= 2) {
     const groupSection = document.createElement("section");
     groupSection.className = "structure-card group-settings";

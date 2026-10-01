@@ -136,7 +136,7 @@ export function textHeightNeeded(shapeXml, scale = 1, widthEmu = null, spacing =
     const content = runTexts(paragraph).join("").replace(/&[a-z]+;/gu, "x");
     const usable = Math.max(1, (width - margin) / 12700); // points
     const rPrs = runRPrs(paragraph); const letterSpacing = Math.max(0, ...rPrs.map((rPr) => Number(rPr.match(/\sspc="(-?\d+)"/u)?.[1] || 0))) / 100 * scale;
-    const charWidth = size * (rPrs.some((rPr) => /\sb="1"/u.test(rPr)) ? 0.57 : 0.53) + letterSpacing;
+    const charWidth = size * (rPrs.some((rPr) => /\sb="1"/u.test(rPr)) ? 0.55 : 0.5) + letterSpacing;
     let lines = 0;
     for (const part of content.split("\t").join("    ").split("\n")) {
       let line = 0; lines += 1;
@@ -164,30 +164,68 @@ export function groupScale(xml, id) {
   }
   return { scaleX, scaleY };
 }
-export function fitText(shapeXml, { minScale = 0.7, height = null, scaleX = 1, scaleY = 1 } = {}) {
-  const geometry = xfrmOf(shapeXml); if (!geometry) return shapeXml;
-  const available = (height ?? geometry.cy) * scaleY;
-  const width = geometry.cx * scaleX;
-  const textHeightNeeded_ = textHeightNeeded;
-  const textHeightNeeded__ = (xml, scale, ignored, spacing = 1) => textHeightNeeded_(xml, scale, width, spacing);
-  if (textHeightNeeded__(shapeXml, 1) <= available) return shapeXml;
+/** Multiply every explicit run size of a shape's text by `scale` (1/100 pt, rounded to 0.5 pt). */
+export function scaleRunSizes(shapeXml, scale, { baseSize = 1800 } = {}) {
+  if (scale >= 0.999) return shapeXml;
+  const range = txBodyRange(shapeXml); const body = shapeXml.slice(range.open, range.close);
+  const scaled = body.replace(/<a:(rPr|endParaRPr)\b([^>]*?)(\/?)>/gu, (whole, tag, attrs, slash) => {
+    const size = Number(attrs.match(/\ssz="(\d+)"/u)?.[1] || baseSize);
+    const next = Math.max(100, Math.round(size * scale / 50) * 50);
+    return `<a:${tag}${attrs.replace(/\ssz="\d+"/u, "")} sz="${next}"${slash}>`;
+  });
+  return `${shapeXml.slice(0, range.open)}${scaled}${shapeXml.slice(range.close)}`;
+}
+const largestRunSize = (shapeXml) => Math.max(0, ...[...shapeXml.matchAll(/<a:rPr\b[^>]*\ssz="(\d+)"/gu)].map((match) => Number(match[1])));
+/**
+ * Rule 7 as ruled 2026-10-01: text that exceeds its shape gets EXPLICIT run sizes (same in PowerPoint and
+ * LibreOffice), stepping down until it fits; body text never below `minPoints` (10 pt), titles never below
+ * `minScale` of the template size. Returns {xml, fits, scale}.
+ */
+export function fitTextSized(shapeXml, { minScale = 0, minPoints = 10, height = null, scaleX = 1, scaleY = 1 } = {}) {
+  const geometry = xfrmOf(shapeXml); if (!geometry) return { xml: shapeXml, fits: true, scale: 1 };
+  const available = (height ?? geometry.cy) * scaleY; const width = geometry.cx * scaleX;
+  const need = (scale) => textHeightNeeded(shapeXml, scale, width);
+  if (need(1) <= available) return { xml: shapeXml, fits: true, scale: 1 };
+  const largest = largestRunSize(shapeXml) || 1800;
+  const floor = Math.max(minScale, minPoints * 100 / largest);
   let scale = 1;
-  while (scale > minScale && textHeightNeeded__(shapeXml, scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  while (scale - 0.025 >= floor - 1e-9 && need(scale) > available) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  if (need(scale) > available) scale = Math.min(scale, Math.max(floor, 0));
+  const xml = setAutofit(scaleRunSizes(shapeXml, scale), "");
+  return { xml, fits: textHeightNeeded(xml, 1, width) <= available, scale };
+}
+export function fitText(shapeXml, options = {}) { return fitTextSized(shapeXml, options).xml; }
+/** Width (EMU) the text of one paragraph needs on a single line at the given scale. */
+export function singleLineWidth(paragraphXml, scale = 1) {
+  let width = 0;
+  for (const match of paragraphXml.matchAll(/<a:r>\s*(<a:rPr\b[^>]*\/>|<a:rPr\b[^>]*>[\s\S]*?<\/a:rPr>)?[\s\S]*?<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)) {
+    const rPr = match[1] || ""; const size = Number(rPr.match(/\ssz="(\d+)"/u)?.[1] || 1800) / 100 * scale;
+    const spacing = Number(rPr.match(/\sspc="(-?\d+)"/u)?.[1] || 0) / 100 * scale;
+    const chars = match[2].replace(/&[a-z]+;/gu, "x").length;
+    width += chars * (size * (/\sb="1"/u.test(rPr) ? 0.55 : 0.5) + spacing);
+  }
+  return width * 12700;
+}
+/** A title on ONE line by explicit run size (down to minScale); else two lines at minScale. */
+export function fitTitleOneLine(shapeXml, { minScale = 0.6, scaleX = 1 } = {}) {
+  const geometry = xfrmOf(shapeXml); const bodyPr = bodyPrOf(shapeXml);
+  // 10 % reserve: renderers substitute fonts of different widths; a one-line title must stay on one line in both.
+  const usable = (geometry.cx * scaleX - insetOf(bodyPr, "lIns", 91440) - insetOf(bodyPr, "rIns", 91440)) * 0.9;
+  const paragraph = paragraphsOf(shapeXml)[0] || "";
+  let scale = 1;
+  while (scale > minScale && singleLineWidth(paragraph, scale) > usable) scale = Math.round((scale - 0.025) * 1000) / 1000;
   scale = Math.max(minScale, scale);
-  // Still too tall at the 70 % floor: let PowerPoint also reduce line spacing (up to 20 %), as its own autofit does.
-  let reduction = 0;
-  while (reduction < 0.2 && textHeightNeeded__(shapeXml, scale, null, 1 - reduction) > available) reduction = Math.round((reduction + 0.05) * 100) / 100;
-  return setAutofit(shapeXml, `<a:normAutofit fontScale="${Math.round(scale * 100000)}"${reduction ? ` lnSpcReduction="${Math.round(reduction * 100000)}"` : ""}/>`);
+  const lines = singleLineWidth(paragraph, scale) > usable ? 2 : 1;
+  return { xml: setAutofit(scaleRunSizes(shapeXml, scale), ""), lines, scale, lineHeight: largestRunSize(shapeXml) / 100 * scale * 1.2 * 12700 };
 }
 export function setAutofit(shapeXml, autofit) {
   const bodyPr = bodyPrOf(shapeXml);
   const open = bodyPr.match(/^<a:bodyPr\b[^>]*?(?=\/?>)/u)[0];
   let inner = bodyPr.endsWith("</a:bodyPr>") ? bodyPr.replace(/^<a:bodyPr\b[^>]*>/u, "").replace(/<\/a:bodyPr>$/u, "") : "";
-  inner = inner.replace(/<a:(?:spAutoFit|noAutofit|normAutofit)\b[^>]*\/>/gu, "").replace(/<a:normAutofit\b[^>]*>[\s\S]*?<\/a:normAutofit>/gu, "");
+  inner = autofit ? inner.replace(/<a:(?:spAutoFit|noAutofit|normAutofit)\b[^>]*\/>/gu, "").replace(/<a:normAutofit\b[^>]*>[\s\S]*?<\/a:normAutofit>/gu, "") : inner.replace(/<a:normAutofit\b[^>]*\/>|<a:normAutofit\b[^>]*>[\s\S]*?<\/a:normAutofit>/gu, "");
   const warp = inner.match(/^<a:prstTxWarp\b[\s\S]*?<\/a:prstTxWarp>/u)?.[0] || "";
   return shapeXml.replace(bodyPr, `${open}>${warp}${autofit}${inner.slice(warp.length)}</a:bodyPr>`);
 }
-export function fontScaleOf(shapeXml) { const value = shapeXml.match(/<a:normAutofit fontScale="(\d+)"/u)?.[1]; return value ? Number(value) / 100000 : 1; }
 export function setBodyInsets(shapeXml, insets) {
   return shapeXml.replace(/<a:bodyPr\b([^>]*?)(\/?)>/u, (whole, attrs, slash) => { let next = attrs; for (const [name, value] of Object.entries(insets)) { next = next.replace(new RegExp(`\\s${name}="[^"]*"`, "u"), ""); next += ` ${name}="${Math.round(value)}"`; } return `<a:bodyPr${next}${slash}>`; });
 }
@@ -325,7 +363,7 @@ export function chartWorkbookRows(data) {
 
 // ---------- new shapes (fill map §1 „New”) ----------
 export function newTextShape({ id, name, x, y, cx, cy, rPr, text: value, align = "l", anchor = "t", autofit = true }) {
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${NEW_SHAPE_PREFIX}${xmlEscape(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x)}" y="${Math.round(y)}"/><a:ext cx="${Math.round(cx)}" cy="${Math.round(cy)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" rtlCol="0" anchor="${anchor}">${autofit ? "<a:normAutofit/>" : "<a:noAutofit/>"}</a:bodyPr><a:lstStyle/><a:p><a:pPr algn="${align}"/>${run(rPr, value)}</a:p></p:txBody></p:sp>`;
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${NEW_SHAPE_PREFIX}${xmlEscape(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x)}" y="${Math.round(y)}"/><a:ext cx="${Math.round(cx)}" cy="${Math.round(cy)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" rtlCol="0" anchor="${anchor}"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="${align}"/>${run(rPr, value)}</a:p></p:txBody></p:sp>`;
 }
 export function newRectShape({ id, name, x, y, cx, cy, fill }) {
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${NEW_SHAPE_PREFIX}${xmlEscape(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x)}" y="${Math.round(y)}"/><a:ext cx="${Math.round(cx)}" cy="${Math.round(cy)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:endParaRPr lang="ro-RO"/></a:p></p:txBody></p:sp>`;

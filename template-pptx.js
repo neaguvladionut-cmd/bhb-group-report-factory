@@ -1,5 +1,5 @@
 import { reportPlan, BUNDLE_FAMILIES, f2 } from "./rebuild-report-plan.js";
-import { EMU, NEW_SHAPE_PREFIX, xmlEscape, getShape, updateShape, hasShape, hideShape, addToTree, xfrmOf, setXfrm, setParagraphs, appendToLastRun, setRunText, templateParagraphs, regularRPr, boldRPr, setRPrAttr, setRPrColor, fitText, withoutBullet, setBodyInsets, moveBand, plotLayoutFromBand, visualBox, groupScale, tableRows, rowHeight, isShadedRow, setRowCells, setRowHeight, setRowId, replaceTableRows, rowLayout, placeBrace, fillChartXml, chartWorkbookRows, roundChartValue, newTextShape, newRectShape } from "./trend-fill.js";
+import { EMU, NEW_SHAPE_PREFIX, xmlEscape, getShape, updateShape, hasShape, hideShape, addToTree, xfrmOf, setXfrm, setParagraphs, appendToLastRun, setRunText, templateParagraphs, regularRPr, boldRPr, setRPrAttr, setRPrColor, fitText, withoutBullet, setBodyInsets, moveBand, plotLayoutFromBand, visualBox, groupScale, fitTitleOneLine, setVisualBox, tableRows, rowHeight, isShadedRow, setRowCells, setRowHeight, setRowId, replaceTableRows, rowLayout, placeBrace, fillChartXml, chartWorkbookRows, roundChartValue, newTextShape, newRectShape } from "./trend-fill.js";
 
 const TEMPLATE_PATH = "./assets/trend/template-raport-de-grup-RO.pptx";
 const FONT_PATH = "./assets/vendor/Poppins-Regular.ttf";
@@ -7,6 +7,7 @@ const relsType = "http://schemas.openxmlformats.org/officeDocument/2006/relation
 const asBytes = (base64) => typeof Buffer !== "undefined" ? Buffer.from(base64, "base64") : Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
 const slideName = (index) => `ppt/slides/slide${index}.xml`;
 const slideRelsName = (index) => `ppt/slides/_rels/slide${index}.xml.rels`;
+const TITLE_ACCENT = "D49802"; // t12 title competency run (orange)
 const NAVY = "003057"; const GREY = "A5A5A5"; const GOLD = "DBA900"; const SIXTH = "FF9D75";
 // Per-competency colours: the template's five series colours, then FF9D75 (DoD 6).
 const ZONE_CATEGORY_COLORS = ["003057", "4472C4", "00A19A", "DBA900", "545454", SIXTH];
@@ -65,8 +66,32 @@ function columnLabelSize(rows) {
 // ---------------------------------------------------------------- slide fillers (fill map §1)
 const groupSuffix = (item) => item.suffix || "";
 const fill = (xml, id, paragraphs, options = {}) => { const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => { const filled = setParagraphs(shape, paragraphs, options); return options.fit === false ? filled : fitText(filled, scale); }); };
-const titleSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitText(appendToLastRun(shape, groupSuffix(item)), scale)); };
-const bandRange = (item) => ({ low: Number(item.low ?? 2.75), high: Number(item.high ?? 3.5) });
+const titleSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitTitleOneLine(appendToLastRun(shape, groupSuffix(item)), scale).xml); };
+const dividerSuffix = (xml, id, item) => { if (!groupSuffix(item)) return xml; const scale = groupScale(xml, id); return updateShape(xml, id, (shape) => fitText(appendToLastRun(shape, groupSuffix(item)), { ...scale, minScale: 0.6, minPoints: 0 })); };
+/** Move shapes below a growing title down by `delta`, compressing them into the same bottom edge (tables scale their rows). */
+function compressBelow(xml, ids, delta) {
+  const boxes = ids.map((id) => visualBox(getShape(xml, id)));
+  const top = Math.min(...boxes.map((box) => box.y)); const bottom = Math.max(...boxes.map((box) => box.y + box.cy));
+  const k = (bottom - top - delta) / (bottom - top);
+  for (const id of ids) xml = updateShape(xml, id, (shape) => {
+    const box = visualBox(shape); let next = setVisualBox(shape, { ...box, y: top + delta + (box.y - top) * k, cy: box.cy * k });
+    if (/<a:tbl>/u.test(next)) next = next.replace(/(<a:tr\b[^>]*\bh=")(\d+)(")/gu, (whole, head, h, tail) => `${head}${Math.round(Number(h) * k)}${tail}`);
+    return next;
+  });
+  return xml;
+}
+/** M5/A4 title: navy „Distribuția pe competențe – ” + orange competency run, one line by explicit size (≥ 60 %). */
+function competencyTitle(xml, id, competency, suffix = "") {
+  let lines = 1; let lineHeight = 0; const scale = groupScale(xml, id);
+  xml = updateShape(xml, id, (shape) => {
+    const styles = templateParagraphs(shape)[0]; const base = styles.rPrs[0];
+    const baseColor = base.match(/<a:srgbClr val="(\w+)"/u)?.[1];
+    const accent = styles.rPrs.find((rPr) => (rPr.match(/<a:srgbClr val="(\w+)"/u)?.[1] || baseColor) !== baseColor) || setRPrColor(base, TITLE_ACCENT);
+    const fitted = fitTitleOneLine(setParagraphs(shape, [[{ text: "Distribuția pe competențe – ", rPr: base }, { text: `${competency}${suffix}`, rPr: accent }]]), scale);
+    lines = fitted.lines; lineHeight = fitted.lineHeight; return fitted.xml;
+  });
+  return { xml, lines, lineHeight };
+}const bandRange = (item) => ({ low: Number(item.low ?? 2.75), high: Number(item.high ?? 3.5) });
 function applyBand(xml, spec, item) {
   if (!spec?.band) return xml;
   const { low, high } = bandRange(item);
@@ -83,7 +108,7 @@ function fillCover(xml, item) {
   if (item.annexMark) xml = updateShape(xml, 12, (shape) => appendToLastRun(shape, " – Anexă"));
   const logo = xfrmOf(getShape(xml, 20));
   const style = setRPrColor(templateParagraphs(getShape(xml, 12))[0].rPrs[0], NAVY);
-  return addToTree(xml, newTextShape({ id: newId(), name: "confidential", x: logo.x, y: logo.y + logo.cy + 0.15 * EMU, cx: logo.cx, cy: 0.6 * EMU, rPr: style, text: "CONFIDENȚIAL", align: "ctr" }));
+  return addToTree(xml, fitTitleOneLine(newTextShape({ id: newId(), name: "confidential", x: logo.x, y: logo.y + logo.cy + 0.15 * EMU, cx: logo.cx, cy: 0.6 * EMU, rPr: style, text: "CONFIDENȚIAL", align: "ctr" }), { minScale: 0.5 }).xml);
 }
 function fillHowToRead(xml, item) {
   xml = updateShape(xml, 93, (shape) => setParagraphs(shape, [[{ text: item.title, run: 0 }]]));
@@ -139,9 +164,10 @@ function fillScoreTable(xml, tableId, values, bandsOf, low, high) {
 const bandOf = (low, high) => (value) => (value > high ? "above" : value < low ? "below" : "in");
 function fillKeyFindings(xml, item) {
   const { low, high } = bandRange(item);
-  xml = updateShape(xml, 21, (shape) => { const styles = templateParagraphs(shape)[0]; const accent = styles.rPrs.find((rPr, index) => index > 0 && /<a:solidFill>/u.test(rPr)) || styles.rPrs[1] || styles.rPrs[0]; return fitText(setParagraphs(shape, [[{ text: "Distribuția pe competențe – ", run: 0 }, { text: item.competency, rPr: accent }]])); });
-  const title = getShape(xml, 21); const titleBox = xfrmOf(title); const styles = templateParagraphs(title)[0];
-  const accent = styles.rPrs.find((rPr, index) => index > 0 && /<a:solidFill>/u.test(rPr)) || styles.rPrs[1] || styles.rPrs[0];
+  const title = competencyTitle(xml, 21, item.competency); xml = title.xml;
+  const shift = title.lines > 1 ? title.lineHeight : 0;
+  if (shift) xml = compressBelow(xml, [6, 19, 17, 20, 18], shift);
+  const titleBox = xfrmOf(getShape(xml, 21)); const accent = setRPrColor(templateParagraphs(getShape(xml, 21))[0].rPrs.at(-1), TITLE_ACCENT);
   const table = fillScoreTable(xml, 6, item.scores, bandOf(low, high), low, high); xml = table.xml;
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
@@ -149,7 +175,7 @@ function fillKeyFindings(xml, item) {
   xml = fill(xml, 17, item.strengths.length ? item.strengths : [""]);
   xml = fill(xml, 18, item.development.length ? item.development : [""]);
   const strengthsHeader = xfrmOf(getShape(xml, 19));
-  return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
+  return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU + shift, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
 }
 function fillBenchmark(xml, item) {
   const { low, high } = bandRange(item); const table = item.table;
@@ -171,7 +197,7 @@ function fillPopulation(xml, item) {
   return updateShape(xml, 26, (shape) => setRunText(shape, 3, benchmarkSentence(item)));
 }
 function fillBehavior(xml, item) {
-  xml = updateShape(xml, 3, (shape) => fitText(appendToLastRun(shape, ` ${item.competency}${groupSuffix(item)}`)));
+  xml = updateShape(xml, 3, (shape) => fitTitleOneLine(appendToLastRun(shape, ` ${item.competency}${groupSuffix(item)}`), { scaleX: 1 }).xml);
   const frame = getShape(xml, 7); const rows = tableRows(frame); const header = rows[0]; const bodyTemplate = rows[1];
   const bodyHeight = rows.slice(1).reduce((sum, row) => sum + rowHeight(row), 0);
   const count = Math.max(1, item.key.length, item.development.length);
@@ -181,8 +207,8 @@ function fillBehavior(xml, item) {
 function cellSize(item, count) {
   // Rule 5/7 for the behaviour table: the longest cell must fit its row (≈ 8.5 in wide); step down to 9 pt minimum.
   const rowPoints = 7.4 * 72 / count; const longest = Math.max(1, ...[...item.key, ...item.development].map((value) => value.length));
-  for (let size = 2000; size >= 900; size -= 100) { const charsPerLine = 8.4 * 72 / (size / 100 * 0.53); const lines = Math.ceil(longest / charsPerLine); if (lines * size / 100 * 1.25 + 8 <= rowPoints) return { size }; }
-  return { size: 900 };
+  for (let size = 2000; size >= 1000; size -= 100) { const charsPerLine = 8.4 * 72 / (size / 100 * 0.53); const lines = Math.ceil(longest / charsPerLine); if (lines * size / 100 * 1.25 + 8 <= rowPoints) return { size }; }
+  return { size: 1000 };
 }
 function fillConclusions(xml, item) {
   xml = titleSuffix(xml, 5, item);
@@ -198,7 +224,7 @@ function fillSlide(xml, item) {
     case "methodology": return fillMethodology(xml, item);
     case "executive-summary": return fillExecutiveSummary(xml, item);
     case "key-findings": return fillKeyFindings(xml, item);
-    case "divider-results": case "divider-behaviors": case "divider-conclusions": return titleSuffix(xml, 8, item);
+    case "divider-results": case "divider-behaviors": case "divider-conclusions": return dividerSuffix(xml, 8, item);
     case "range": return updateShape(titleSuffix(xml, 3, item), 26, (shape) => setRunText(shape, 3, benchmarkSentence(item)));
     case "ranking": case "zone": return titleSuffix(xml, 4, item);
     case "benchmark": return fillBenchmark(xml, item);
@@ -207,7 +233,7 @@ function fillSlide(xml, item) {
     case "conclusions": return fillConclusions(xml, item);
     case "appendix-divider": return fill(fill(xml, 8, [item.heading], { fit: false }), 9, [item.subheading], { fit: false });
     case "participant-mean": case "participant-comparison": return xml;
-    case "competency-participants": return updateShape(xml, 5, (shape) => fitText(appendToLastRun(shape, ` ${item.competency}`)));
+    case "competency-participants": { const title = competencyTitle(xml, 5, item.competency); return title.lines > 1 ? compressBelow(title.xml, [2, 3], title.lineHeight) : title.xml; }
     case "close": return xml;
     default: throw new Error(`No fill rule for plan family ${item.family}.`);
   }

@@ -34,6 +34,9 @@ export const participants = Array.from({ length: 20 }, (_, index) => {
 
 export const behaviorRows = competencies.flatMap(({ name }) => longLabels[name].map((behavior, index) => ({ competency: name, subcompetency: `Subcompetență ${name.slice(0, 18)}`, behavior, index })));
 
+// Varies by behaviour so the shares of 2 and 0 differ between behaviours (key findings show distinct %).
+export const behaviourScore = (participant, participantIndex, row) => (participant.score * (row.index % 3 + 1) + Math.floor(participantIndex * (row.index + 2) / 3)) % 3;
+
 export function fixtureRows() {
   const summaryHeaders = ["CODE", "name", "cod cp", ...competencies.map(({ name }) => name)];
   const headers = ["CODE", "name the person evaluated", "regiune", "cod ac", "Competente", ...behaviorRows.map((row) => row.competency)];
@@ -44,7 +47,7 @@ export function fixtureRows() {
     headers,
     subcompetencies,
     behaviors,
-    ...participants.map((participant, participantIndex) => [participant.code, participant.name, participant.region, participant.assessment, "", ...behaviorRows.map((row) => row.competency === competencies[2].name && row.behavior === longLabels[competencies[2].name].at(-1) ? "" : (participant.score + row.index + participantIndex) % 3)])
+    ...participants.map((participant, participantIndex) => [participant.code, participant.name, participant.region, participant.assessment, "", ...behaviorRows.map((row) => row.competency === competencies[2].name && row.behavior === longLabels[competencies[2].name].at(-1) ? "" : behaviourScore(participant, participantIndex, row))])
   ];
   return { summary, detailed, behaviorRows };
 }

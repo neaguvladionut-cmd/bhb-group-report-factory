@@ -7,7 +7,7 @@ import { buildPayload } from "../src/rebuild-core.js";
 import { BUNDLE_FAMILIES, f2, participantsPerSlide, reportPlan, splitEqual } from "../src/rebuild-report-plan.js";
 import { buildBundleArtifacts, generateTrendPptx } from "../src/template-pptx.js";
 import { getShape, shapeText, tableRows, visualBox, xfrmOf, NEW_SHAPE_PREFIX } from "../src/trend-fill.js";
-import { createFixture as acceptanceFixture } from "./fixtures/grf-r-acceptance-fixture.mjs";
+import { createFixture as acceptanceFixture, fixtureRows as acceptanceRows } from "./fixtures/grf-r-acceptance-fixture.mjs";
 import { createFixture as variedFixture, participants as variedParticipants } from "./fixtures/grf-r-varied-fixture.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -115,7 +115,7 @@ test("M5 key findings: table rows per scored participant, braces span their band
     assert.equal(text(getShape(xml, 19)), "Abilități cheie – Puncte forte");
     assert.equal(text(getShape(xml, 20)), "Arii de dezvoltare");
     const strengths = text(getShape(xml, 17)).split("\n").filter(Boolean); assert.equal(strengths.length, item.insight.key.length);
-    strengths.forEach((line) => assert.match(line, / \(\d+ %\)$/u));
+    strengths.forEach((line) => assert.match(line, / \(\d+%\)$/u));
     assert.match(xml, new RegExp(`GRF-R new:subtitle[\\s\\S]*?medie ${f2(item.mean)} · mediană ${f2(item.median)}`, "u"));
   }
 });
@@ -150,8 +150,11 @@ test("rule 4: bands move with an edited benchmark (t13 band maps 1–5 from the 
   const edited = await deck(payloadOf(acceptance, { benchmarkLow: "3", benchmarkHigh: "4" }));
   const index = edited.plan.findIndex((item) => item.family === "competency-participants");
   const original = visualBox(getShape(templateSlides.get(13), 3)); const moved = visualBox(getShape(edited.slides[index], 3));
-  const perPoint = original.cy / 0.75;
-  assert(Math.abs(moved.cy - perPoint) < 2); assert(Math.abs(moved.y - (original.y - 0.5 * perPoint)) < 2, JSON.stringify({ original, moved, perPoint }));
+  // A two-line title compresses chart and band together (k); the band keeps the 1–5 mapping of its chart.
+  const frameBefore = xfrmOf(getShape(templateSlides.get(13), 2)); const frameAfter = xfrmOf(getShape(edited.slides[index], 2));
+  const k = frameAfter.cy / frameBefore.cy; const top = frameBefore.y; const topAfter = frameAfter.y;
+  const perPoint = original.cy / 0.75 * k;
+  assert(Math.abs(moved.cy - perPoint) < 3); assert(Math.abs(moved.y - (topAfter + (original.y - top) * k - 0.5 * perPoint)) < 3, JSON.stringify({ original, moved, perPoint }));
   const benchmark = edited.slides[edited.plan.findIndex((item) => item.family === "benchmark")];
   assert.equal(text(getShape(benchmark, 19)), "Rezultate raportate la benchmark (3.00-4.00)");
   const range = edited.slides[edited.plan.findIndex((item) => item.family === "range")];
@@ -231,4 +234,70 @@ test("bundle (F15): one cropped item per chart and table, values equal to the de
     const haystack = decode(split.slides[slideIndex] + charts.map((chart) => chart.chart).join(""));
     for (const value of entry.sourceValues) assert(haystack.includes(value), `bundle item ${entry.id} value ${value} is not in deck slide ${entry.deckSlide}`);
   }
+});
+
+test("E: a key-finding share equals a hand count from the raw fixture rows", () => {
+  const { detailed } = acceptanceRows();
+  const column = 5; // first behaviour of the first competency (Leadership …)
+  const scores = detailed.slice(3).map((row) => row[column]).filter((value) => value !== "");
+  const expected = Math.round(scores.filter((value) => value === 2).length / scores.length * 100);
+  const index = whole.plan.findIndex((item) => item.family === "key-findings" && item.competency === detailed[0][column]);
+  const behaviour = detailed[2][column];
+  const lines = text(getShape(whole.slides[index], 17)).split("\n").concat(text(getShape(whole.slides[index], 18)).split("\n"));
+  const line = lines.find((entry) => entry.includes(behaviour));
+  assert(line, "the behaviour is ranked into a key-findings list");
+  const share = /Să exersezi/u.test(line) ? Math.round(scores.filter((value) => value === 0).length / scores.length * 100) : expected;
+  assert(line.endsWith(`(${share}%)`), `${line} ≠ (${share}%)`);
+  const shares = new Set(whole.slides.filter((_, slideIndex) => whole.plan[slideIndex].family === "key-findings").flatMap((xml) => text(getShape(xml, 17)).match(/\(\d+%\)/gu) || []));
+  assert(shares.size > 1, "shares differ between behaviours");
+});
+
+test("D: box plot keeps the template's median diamond and the varied fixture has a median strictly inside the range", async () => {
+  const index = variedDeck.plan.findIndex((item) => item.family === "range");
+  const item = variedDeck.plan[index];
+  assert(item.items.some((row) => row.median > row.min && row.median < row.max));
+  const [{ chart }] = await variedDeck.chartsOf(index);
+  const median = chart.match(/<c:ser>[\s\S]*?<\/c:ser>/gu).find((series) => /<c:v>MEDIAN<\/c:v>/u.test(series));
+  assert.match(median, /<c:marker><c:symbol val="diamond"\/>/u);
+});
+
+test("ruling 8: R5 below six behaviours splits evenly or skips the middle one, on the generated tables", async () => {
+  const workbook = (rows) => { const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), "Sheet1"); return XLSX.write(book, { type: "buffer", bookType: "xlsx" }); };
+  const counts = [1, 2, 3, 4, 5]; const names = counts.map((count) => `Competență cu ${count} comportamente`);
+  const columns = counts.flatMap((count, competencyIndex) => Array.from({ length: count }, (_, index) => ({ competency: names[competencyIndex], behavior: `C${count}-B${index + 1}`, index })));
+  const people = Array.from({ length: 4 }, (_, index) => ({ name: `Test ${index + 1}`, id: `T-${index + 1}` }));
+  const summary = workbook([["CODE", "name", "cod cp", ...names], ...people.map((person, index) => ["", person.name, person.id, ...names.map(() => 2 + (index % 3))])]);
+  const detailed = workbook([["CODE", "name the person evaluated", "regiune", "cod ac", "Competente", ...columns.map((column) => column.competency)], ["", "", "", "", "Subcompetente", ...columns.map(() => "S")], ["", "", "", "", "behavior", ...columns.map((column) => column.behavior)], ...people.map((person) => ["", person.name, "R", person.id, "", ...columns.map((column) => Math.max(0, 2 - Math.floor(column.index / 2)))])]);
+  const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: summary }, { name: "detail.xlsx", bytes: detailed }], { projectName: "R5 boundary", clientName: "Test" }, {}, { acknowledgedWarningIds: [] });
+  const generated = await deck(payload);
+  const expected = { 1: 0, 2: 1, 3: 1, 4: 2, 5: 2 };
+  for (const count of counts) {
+    const name = names[count - 1];
+    const behaviorIndex = generated.plan.findIndex((item) => item.family === "behavior" && item.competency === name);
+    if (!expected[count]) { assert.equal(behaviorIndex, -1, "one behaviour: nothing to rank, no table"); continue; }
+    const plan = generated.plan[behaviorIndex];
+    assert.equal(plan.key.length, expected[count]); assert.equal(plan.development.length, expected[count]);
+    assert.equal(tableRows(getShape(generated.slides[behaviorIndex], 7)).length, 1 + expected[count]);
+    if (count % 2) assert(!plan.key.concat(plan.development).includes(`C${count}-B${(count + 1) / 2}`), "the middle behaviour is skipped");
+    const finding = generated.plan.findIndex((item) => item.family === "key-findings" && item.competency === name);
+    assert.equal(text(getShape(generated.slides[finding], 17)).split("\n").filter(Boolean).length, expected[count]);
+  }
+});
+
+test("B: text fit uses explicit run sizes, never normAutofit, body text ≥ 10 pt", () => {
+  for (const generated of [whole, split, variedDeck]) generated.slides.forEach((xml, index) => {
+    assert.doesNotMatch(xml, /normAutofit|lnSpcReduction/u, `slide ${index + 1}`);
+    if (["key-findings", "how-to-read", "methodology", "executive-summary", "behavior", "benchmark"].includes(generated.plan[index].family)) {
+      const ids = { "key-findings": [17, 18], "how-to-read": [5, 6], methodology: [5, 6], "executive-summary": [4, 7, 11], behavior: [7], benchmark: [4, 17] }[generated.plan[index].family];
+      for (const id of ids) for (const size of getShape(xml, id).matchAll(/<a:rPr\b[^>]*\ssz="(\d+)"/gu)) assert(Number(size[1]) >= 1000, `slide ${index + 1} id ${id} has ${size[1] / 100} pt`);
+    }
+  });
+});
+
+test("C: methodology omits a consultant fact left empty instead of printing a number-less line", () => {
+  const method = whole.slides[2];
+  const lines = text(getShape(method, 5)).split("\n");
+  assert(lines.every((line) => /^\d/u.test(line) || /^Alte instrumente/u.test(line)), lines.join(" | "));
+  assert(!lines.some((line) => /^consultanți|^zile|^exerciții/u.test(line)));
+  assert.deepEqual(whole.plan[2].page.missingLabels, ["consultanți TREND implicați", "zile de evaluare", "număr de exerciții"]);
 });

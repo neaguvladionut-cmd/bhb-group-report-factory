@@ -77,10 +77,11 @@ export function rankBehaviors(rows = []) {
     if (ranked.length >= 10) { keyCount = 5; developmentCount = 5; }
     else if (ranked.length >= 6) { keyCount = 3; developmentCount = 3; }
     else {
-      const medianIndex = Math.floor(ranked.length / 2);
-      medianBehavior = ranked[medianIndex] || null;
-      keyCount = medianIndex;
-      developmentCount = Math.max(0, ranked.length - medianIndex - 1);
+      // Below 6 (Vlad, 2026-10-01): an even count splits exactly in half; an odd count skips the middle behaviour.
+      const half = Math.floor(ranked.length / 2);
+      medianBehavior = ranked.length % 2 ? ranked[half] : null;
+      keyCount = half;
+      developmentCount = half;
     }
     const key = ranked.slice(0, keyCount);
     const development = ranked.slice(ranked.length - developmentCount);
@@ -127,13 +128,17 @@ export function methodologyColumns(payload) {
     { number: String((payload.behaviorAggregates || []).length), text: "comportamente specifice observate" },
     { number: exerciseCount, text: `exerciții concepute pentru a evidenția nivelul competențelor evaluate${exerciseList ? `: ${exerciseList}` : ""}` }
   ];
+  // A fact the consultant left empty is omitted, never printed as a number-less sentence (ruling 2026-10-01).
+  const missing = { evaluators: !consultants, days: !days, exercises: !exerciseCount };
+  for (let index = facts.length - 1; index >= 1; index -= 1) if (!facts[index].number) facts.splice(index, 1);
   if (text(metadata.otherInstruments)) facts.push({ number: "", text: `Alte instrumente folosite: ${text(metadata.otherInstruments)}` });
   const principles = text(metadata.methodologyText) ? text(metadata.methodologyText).split(/\n+/u).map(text).filter(Boolean) : METHODOLOGY_PRINCIPLES;
   const line = (fact) => `${fact.number ? `${fact.number} ` : ""}${fact.text}`;
   return {
     facts, principles,
     left: ["METODOLOGIE", ...facts.map(line)], right: ["PROCESUL DE EVALUARE", ...principles],
-    missing: { evaluators: !consultants, days: !days, exercises: !exerciseCount && !exerciseList, otherInstruments: !text(metadata.otherInstruments) }
+    missing: { ...missing, otherInstruments: !text(metadata.otherInstruments) },
+    missingLabels: [missing.evaluators && "consultanți TREND implicați", missing.days && "zile de evaluare", missing.exercises && "număr de exerciții"].filter(Boolean)
   };
 }
 export const methodologyPages = (payload) => [{ page: methodologyColumns(payload) }];
@@ -156,7 +161,7 @@ export function executiveSummary(payload) {
   };
 }
 
-const behaviourLine = (row, field, share) => `${text(row[field]) || row.behavior} (${Math.round((share || 0) * 100)} %)`;
+const behaviourLine = (row, field, share) => `${text(row[field]) || row.behavior} (${Math.round((share || 0) * 100)}%)`;
 export function competencyFindings(payload) {
   const insights = new Map(behaviorInsights(payload.behaviorAggregates || []).map((item) => [item.competency, item]));
   const { low, high } = payload.bands;

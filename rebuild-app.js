@@ -66,6 +66,14 @@ function renderStructure() {
   const main = plan.filter((slide) => slide.deliverable !== "appendix");
   const appendix = plan.filter((slide) => slide.deliverable === "appendix");
   root.innerHTML = `<div class="structure-card"><strong>Trend · raport principal</strong><span>${main.length} slide-uri</span><small>Întregul proiect primul; grupurile CODE urmează doar când activezi împărțirea.</small></div><div class="structure-card"><strong>Anexă</strong><span>${appendix.length ? `${appendix.length} slide-uri` : "dezactivată"}</span><small>${payload.metadata.annex === "separate" ? "Se descarcă separat." : payload.metadata.annex === "none" ? "Nu se generează." : "Se include la final."}</small></div>`;
+  const missingMethodology = methodologyColumns(payload).missingLabels || [];
+  if (missingMethodology.length) {
+    const warning = document.createElement("p");
+    warning.className = "structure-card methodology-warning";
+    warning.setAttribute("role", "status");
+    warning.textContent = `Câmpuri de metodologie necompletate: ${missingMethodology.join(", ")}. Rândurile lor nu apar în raport până nu le completezi.`;
+    root.append(warning);
+  }
   if (payload.groups.length >= 2) {
     const groupSection = document.createElement("section");
     groupSection.className = "structure-card group-settings";
