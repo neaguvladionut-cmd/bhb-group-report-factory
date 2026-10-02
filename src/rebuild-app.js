@@ -61,7 +61,6 @@ function download(blob, name) {
   if (!link) return;
   link.href = activeDownloadUrl; link.download = name; link.textContent = `Dacă descărcarea nu a pornit, apasă aici pentru ${name}.`; link.hidden = false; link.click();
 }
-window.__grfDownload = download;
 
 function requiredFilesPresent() { const kinds = new Set((payload?.schemas || []).map((schema) => schema.kind)); return kinds.has("ac-summary-1-5") && kinds.has("ac-detailed-0-2"); }
 function warningComplete() { return Boolean(payload) && payload.warnings.every((item) => item.reviewed); }
@@ -130,8 +129,9 @@ function renderFound() {
     "proposal-population": "20 participanți (12 manageri, 8 specialiști)",
     "proposal-location": "București"
   };
+  const projectSource = text(values.projectName) && text(values.projectName) !== text(state.projectName) ? "completat de tine" : "din numele fișierului";
   const fields = [
-    ["project-name", "Nume proiect", "Numele proiectului apare pe copertă.", values.projectName || state.projectName, "Apare în: copertă și numele fișierelor.", "din numele fișierului", "text"],
+    ["project-name", "Nume proiect", "Numele proiectului apare pe copertă.", values.projectName || state.projectName, "Apare în: copertă și numele fișierelor.", projectSource, "text"],
     ["client-name", "Client", "Numele clientului rămâne în metodologia raportului și în numele fișierelor.", values.clientName, "Apare în: metodologia raportului și numele fișierelor.", "de confirmat de consultant", "text"],
     ["report-date", "Data raportului", "Data propusă pentru livrare.", values.reportDate || today(), "Apare în: copertă și chitanță.", "propunere", "text"],
     ["program", "Program", "Denumirea programului din livrare.", values.program || "Centru de Dezvoltare", "Apare în: copertă și metodologia raportului.", "standard Trend", "text"],
@@ -143,7 +143,7 @@ function renderFound() {
     ["proposal-location", "Locația evaluării", "Locația este propusă din informațiile despre locația evaluării din export.", values.location, "Apare în: metodologia raportului.", proposalChip(method.locations?.length), "text", "location"]
   ];
   const derived = $("#derived-fields");
-  if (derived) derived.innerHTML = fields.map(([id, label, help, value, where, source, type, proposalKey]) => { const helpId = `${id}-help`; const exampleId = `${id}-example`; const whereId = `${id}-where`; return `<div class="derived-field"><label for="${id}">${esc(label)}</label><p id="${helpId}" class="field-help">${esc(help)}</p><p id="${exampleId}" class="field-help">Exemplu: ${esc(examples[id])}.</p><input id="${id}" data-derived-field="true" data-proposal-key="${esc(proposalKey || "")}" type="${type}" value="${esc(value)}" placeholder="${esc(examples[id])}" aria-describedby="${helpId} ${exampleId} ${whereId}">${source ? `<span class="source-chip">${esc(source)}</span>` : ""}<span id="${whereId}" class="field-where">${esc(where)}</span></div>`; }).join("");
+  if (derived) derived.innerHTML = fields.map(([id, label, help, value, where, source, type, proposalKey]) => { const helpId = `${id}-help`; const exampleId = `${id}-example`; const whereId = `${id}-where`; const placeholder = text(value) ? examples[id] : `De completat · Exemplu: ${examples[id]}`; return `<div class="derived-field"><label for="${id}">${esc(label)}</label><p id="${helpId}" class="field-help">${esc(help)}</p><p id="${exampleId}" class="field-help">Exemplu: ${esc(examples[id])}.</p><input id="${id}" data-derived-field="true" data-proposal-key="${esc(proposalKey || "")}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}" aria-describedby="${helpId} ${exampleId} ${whereId}">${source ? `<span class="source-chip">${esc(source)}</span>` : ""}<span id="${whereId}" class="field-where">${esc(where)}</span></div>`; }).join("");
   addFieldListeners();
   [["evaluators", "evaluators"], ["days", "days"], ["team-size", "teamSize"], ["evaluation-period", "evaluationPeriod"], ["population-role", "populationByRole"], ["location", "location"]].forEach(([id, key]) => { const input = $(`#${id}`); if (input) input.value = state.methodologyProposals[key] ?? ""; });
 }

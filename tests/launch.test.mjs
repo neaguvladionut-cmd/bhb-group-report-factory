@@ -102,6 +102,17 @@ test("confirming the final warning focuses the first blocker when blockers remai
   assert.match(issues, /article\.tabIndex = -1/u);
 });
 
+test("manual project edits are labelled, empty page-one fields are actionable, and downloads use the native path", async () => {
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  const template = await readFile(resolve(root, "src/template-pptx.js"), "utf8");
+  const styles = await readFile(resolve(root, "src/styles.css"), "utf8");
+  assert.match(app, /text\(values\.projectName\) !== text\(state\.projectName\) \? "completat de tine"/u);
+  assert.match(app, /const placeholder = text\(value\) \? examples\[id\] : `De completat · Exemplu: \$\{examples\[id\]\}`/u);
+  assert.doesNotMatch(app, /window\.__grfDownload/u);
+  assert.doesNotMatch(template, /window\.__grfDownload/u);
+  assert.doesNotMatch(styles, /stat-caption/u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
@@ -121,5 +132,5 @@ test("built deploy bundle initializes without throwing in a DOM-like vm", async 
   const document = { body: { dataset: {} }, querySelector: () => null, querySelectorAll: () => [] };
   const window = { XLSX: {}, JSZip: {}, __grfBooted() {} };
   assert.doesNotThrow(() => vm.runInNewContext(bundle, { Blob, Intl, Map, Set, URL, document, window }));
-  assert.equal(typeof window.__grfDownload, "function");
+  assert.equal(window.__grfDownload, undefined);
 });
