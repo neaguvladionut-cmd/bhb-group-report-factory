@@ -161,7 +161,8 @@ function renderReview() {
   groupedIssues(pending, "warning").forEach((group) => root.append(renderIssueGroup(group, { payload, onConfirm })));
   if (!root.children.length) root.innerHTML = `<div class="review-state all-clear"><strong>Nu mai există blocaje sau avertismente de confirmat.</strong><span>Poți alege structura raportului.</span></div>`;
   const confirmAll = $("#confirm-all"); if (confirmAll) { confirmAll.hidden = blockers.length > 0 || pending.length === 0; confirmAll.disabled = blockers.length > 0 || pending.length === 0; }
-  const note = $("#review-action-note"); if (note) note.textContent = blockers.length ? "Rezolvă blocajele din export și încarcă fișierele corectate." : pending.length ? "Confirmă fiecare grup sau folosește Confirmă toate avertismentele." : "Totul este confirmat; poți continua.";
+  // Confirmă toate avertismentele remains the explicit action button label; the footer states the current count.
+  const note = $("#review-action-note"); if (note) note.textContent = blockers.length ? "Rezolvă blocajele înainte de a merge mai departe." : pending.length ? `Mai sunt ${pendingGroups.length} grupuri de confirmat.` : "Totul este confirmat; poți continua.";
 }
 
 function outlineLabel(slide) { const family = { cover: "Copertă", "how-to-read": "Cum se citește", methodology: "Metodologie", "executive-summary": "Rezumat executiv", population: "Distribuția rezultatelor", ranking: "Medii pe competențe", zone: "Regiuni", "appendix-divider": "Anexă · rezultate individuale", "participant-mean": "Rezultate individuale", "participant-comparison": "Comparație pe participanți", "divider-observations": "Analiza observațiilor", "key-findings": "Constatări cheie", "competency-participants": "Grafice pe competențe", "divider-behaviors": "Comportamente cheie", behavior: "Comportamente cheie", conclusions: "Concluzii și recomandări", close: "Mulțumim" }; return family[slide.family] || slide.title || "Secțiune"; }

@@ -75,6 +75,13 @@ test("adding a source preserves edited proposals and corrections for the next re
   assert.match(app, /if \(!state\.methodologyProposalEdits\.has\(key\)\) state\.methodologyProposals\[key\] = String\(value\)/u);
 });
 
+test("page-two review footer reports blockers, warning groups and confirmed state", async () => {
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  assert.match(app, /Rezolvă blocajele înainte de a merge mai departe\./u);
+  assert.match(app, /Mai sunt \$\{pendingGroups\.length\} grupuri de confirmat\./u);
+  assert.match(app, /Totul este confirmat; poți continua\./u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
