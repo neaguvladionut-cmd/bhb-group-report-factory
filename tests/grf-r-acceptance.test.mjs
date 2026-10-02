@@ -192,7 +192,7 @@ fx,fy,fw,fh=a['frame']; lx,ly,lw,lh=a['layout']
 left=(fx+lx*fw)*d; top=(fy+ly*fh)*d; width=lw*fw*d; height=lh*fh*d
 g=lambda p,lo,hi: abs(p[0]-p[1])<6 and abs(p[1]-p[2])<6 and lo<=p[0]<=hi
 if a['axis']=='y':
-  c=int(left+width*0.05); pix=[(y,im.getpixel((c,y))) for y in range(int(top-20),min(H,int(top+height+20)))]
+  c=int(left+width*a.get('probe',0.05)); pix=[(y,im.getpixel((c,y))) for y in range(int(top-20),min(H,int(top+height+20)))]
 else:
   c=int(top+height/a['slots']); pix=[(x,im.getpixel((x,c))) for x in range(max(0,int(left-20)),min(W,int(left+width+20)))]
 runs=[]
@@ -213,7 +213,7 @@ print(json.dumps({'low':lo,'high':hi,'gridlines':len(centers)}))`;
 test("F21: on the pinned charts (M7 box plot, A2) the rendered band lands on the benchmark (default and 3.00–3.75)", async (t) => {
   const soffice = await tool("soffice"); const pdftoppm = await tool("pdftoppm");
   if (!soffice || !pdftoppm || !(await binaryCommandAvailable("python3"))) { t.skip("LibreOffice, Poppler or Python is unavailable (set GRF_SOFFICE / GRF_PDFTOPPM)"); return; }
-  const { createFixture: inspectorFixture } = await import("./fixtures/grf-r-insp4-fixture.mjs");
+  const { createFixture: inspectorFixture } = await import("./fixtures/grf-r-insp5-fixture.mjs");
   const source = inspectorFixture(XLSX);
   const temp = await mkdtemp(join(tmpdir(), "grf-r-band-"));
   try {
@@ -222,7 +222,7 @@ test("F21: on the pinned charts (M7 box plot, A2) the rendered band lands on the
       const plan = reportPlan(payload); const generated = await generatedDeck(payload);
       const deckPath = join(temp, `band-${low}.pptx`); await writeFile(deckPath, generated.bytes);
       await run(soffice, ["--headless", "--convert-to", "pdf", "--outdir", temp, deckPath], { timeout: 300000 });
-      for (const [family, frameId, axis, unit] of [["range", 22, "y", 0.5], ["participant-mean", 2, "x", 0.5]]) {
+      for (const [family, frameId, axis, unit, nth] of [["range", 22, "y", 0.5, 0], ["participant-mean", 2, "x", 0.5, 0], ["participant-comparison", 6, "y", 0.5, 0], ["competency-participants", 2, "y", 0.5, 0]]) {
         const index = plan.findIndex((item) => item.family === family);
         const slide = await generated.zip.file(`ppt/slides/slide${index + 1}.xml`).async("string");
         const frameShape = slide.slice(slide.lastIndexOf("<p:graphicFrame", slide.indexOf(`<p:cNvPr id="${frameId}"`)));
@@ -233,8 +233,8 @@ test("F21: on the pinned charts (M7 box plot, A2) the rendered band lands on the
         const png = join(temp, `${family}-${low}`);
         await run(pdftoppm, ["-png", "-r", "100", "-f", String(index + 1), "-l", String(index + 1), join(temp, `band-${low}.pdf`), png]);
         const file = (await readdir(temp)).find((name) => name.startsWith(`${family}-${low}`) && name.endsWith(".png"));
-        const { stdout } = await run("python3", ["-c", MEASURE_BAND, JSON.stringify({ png: join(temp, file), axis, frame: xfrm, layout, dpi: 100, unit, slots: plan[index].rows?.length || 1 })]);
-        const measured = JSON.parse(stdout);
+        const { stdout } = await run("python3", ["-c", MEASURE_BAND, JSON.stringify({ png: join(temp, file), axis, frame: xfrm, layout, dpi: 100, unit, slots: plan[index].rows?.length || 1, probe: family === "range" ? 0.05 : 1 / (plan[index].rows?.length || 1) })]);
+        const measured = JSON.parse(stdout); if (process.env.GRF_DEBUG) console.log("MEASURED", family, low, high, JSON.stringify(measured));
         assert(Math.abs(measured.low - low) < 0.04 && Math.abs(measured.high - high) < 0.04, `${family} band renders at ${measured.low.toFixed(2)}–${measured.high.toFixed(2)}, expected ${low}–${high}`);
       }
     }

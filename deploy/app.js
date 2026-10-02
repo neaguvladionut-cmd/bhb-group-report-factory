@@ -351,6 +351,9 @@ const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark"
 
 // Rule 10: readable participants per slide, split into the fewest slides, sizes differing by at most one.
 const PARTICIPANT_START_CAPS = { "participant-mean": 25, "participant-comparison": 5, "competency-participants": 20 };
+// A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
+// segment, and at least a quarter of the whole name (F34).
+const labelChars = (name) => Math.max(...String(name).split(/[\s-]+/u).map((part) => part.length + 1), Math.ceil(String(name).length / 4));
 function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } = {}) {
   if (family === "participant-mean") { // horizontal bars on a plot ≈ 8.0 in tall, gap 150 %: label ≥ 10 pt, bar ≥ 0.12 in
     const slot = Math.max(10 * 1.25 / 72, 0.12 * 2.5);
@@ -358,7 +361,7 @@ function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } = {}) {
   }
   const plotWidth = 17.2; // column charts t9 / t13–t17, gap 219 %, overlap −27 %
   const barSlot = 0.12 * (seriesCount * 1.27 - 0.27 + 2.19);
-  const labelSlot = Math.max(1, longestLabel) * 10 * 0.52 / 72 / 2; // a 10 pt label may wrap onto two lines
+  const labelSlot = Math.max(1, longestLabel) * 10 * 0.55 / 72; // longestLabel = labelChars(): a 10 pt label wraps onto ≤ 4 lines
   return Math.max(1, Math.floor(plotWidth / Math.max(barSlot, labelSlot)));
 }
 function participantsPerSlide(family, options = {}) { return Math.max(1, Math.min(PARTICIPANT_START_CAPS[family] || 20, readableCapacity(family, options))); }
@@ -569,7 +572,7 @@ function appendixSlides(payload) {
   const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "appendix", low: payload.bands.low, high: payload.bands.high, ...data });
   const competencies = (payload.competencies || payload.calculations.map((item) => item.competency)).filter((competency) => payload.records.some((record) => Number.isFinite(record.scores?.[competency])));
   const participants = payload.records.map((record) => ({ name: record.name, mean: overallMean(record), scores: record.scores || {} })).filter((row) => Number.isFinite(row.mean)).sort((a, b) => b.mean - a.mean);
-  const longestLabel = Math.max(0, ...participants.map((row) => row.name.length));
+  const longestLabel = Math.max(0, ...participants.map((row) => labelChars(row.name)));
   add("appendix-divider", { title: "Anexă – rezultate individuale", heading: "Anexă", subheading: "rezultate individuale" });
   const meanPages = splitEqual(participants, participantsPerSlide("participant-mean", { longestLabel }));
   meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length }));
@@ -580,6 +583,13 @@ function appendixSlides(payload) {
     const pages = splitEqual(rows, participantsPerSlide("competency-participants", { longestLabel }));
     pages.forEach((pageRows, page) => add("competency-participants", { title: `Distribuția pe competențe – ${competency}`, competency, competencyIndex, templateIndex: competencyIndex < 5 ? 13 + competencyIndex : 13, recolor: competencyIndex >= 5 ? "FF9D75" : "", rows: pageRows, page: page + 1, pages: pages.length }));
   });
+  // F34: one label size per annex series — the smallest per-page fit (≤ 20 pt, ≥ 10 pt).
+  for (const family of ["participant-comparison", "competency-participants"]) {
+    const pages = slides.filter((slide) => slide.family === family);
+    const fit = (page) => { const slot = 17.2 * 72 / Math.max(1, page.rows.length) * 0.9; const need = Math.max(1, ...page.rows.map((row) => labelChars(row.name))); return Math.max(1000, Math.min(2000, Math.floor(slot / (need * 0.55)) * 100)); };
+    const size = Math.min(2000, ...pages.map(fit));
+    pages.forEach((page) => { page.labelSize = size; });
+  }
   return slides;
 }
 
@@ -608,7 +618,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
 
-Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
+Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
 
 (()=>{
 // BP-GRF-R fill layer: writes plan data into the named shapes of a cloned Trend template slide
@@ -934,7 +944,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, fixedAxis = false, plotLayout = null } = {}) {
+function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -969,6 +979,10 @@ function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], category
   if (dataLabelSize) output = output.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/gu, (labels) => labels.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/gu, (whole, head, size, tail) => `${head}${Math.min(Number(size), dataLabelSize)}${tail}`));
   if (plotLayout) output = setPlotLayout(output, plotLayout);
   if (valueOnlyLabels) output = output.replace(/<c:showSerName val="1"\/>/gu, '<c:showSerName val="0"/>').replace(/<c:showVal val="0"\/>/gu, '<c:showVal val="1"/>').replace(/<c:separator>[^<]*<\/c:separator>/gu, "");
+  if (legendLayout) output = output.replace(/<c:legend>[\s\S]*?<\/c:legend>/u, (block) => block
+    .replace(/<c:x val="[^"]*"\/>/u, `<c:x val="${legendLayout.x.toFixed(4)}"/>`).replace(/<c:y val="[^"]*"\/>/u, `<c:y val="${legendLayout.y.toFixed(4)}"/>`)
+    .replace(/<c:w val="[^"]*"\/>/u, `<c:w val="${legendLayout.w.toFixed(4)}"/>`).replace(/<c:h val="[^"]*"\/>/u, `<c:h val="${legendLayout.h.toFixed(4)}"/>`)
+    .replace(/(<a:defRPr\b[^>]*\bsz=")\d+(")/u, `$1${legendLayout.size}$2`));
   if (legend) {
     const legendXml = `<c:legend><c:legendPos val="b"/><c:layout><c:manualLayout><c:xMode val="edge"/><c:yMode val="edge"/><c:x val="${legend.x.toFixed(4)}"/><c:y val="${legend.y.toFixed(4)}"/><c:w val="${legend.w.toFixed(4)}"/><c:h val="${legend.h.toFixed(4)}"/></c:manualLayout></c:layout><c:overlay val="0"/><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${legend.size}"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ro-RO"/></a:p></c:txPr></c:legend>`;
     output = output.replace(/<c:legend>[\s\S]*?<\/c:legend>/u, "").replace(/<c:plotVisOnly\b/u, `${legendXml}<c:plotVisOnly`);
@@ -1038,6 +1052,9 @@ const allSlideNumbers = (zip) => Object.keys(zip.files).filter((name) => /^ppt\/
 const allChartNumbers = (zip) => Object.keys(zip.files).filter((name) => /^ppt\/charts\/chart\d+\.xml$/u.test(name)).map((name) => Number(name.match(/chart(\d+)\.xml/u)[1])).sort((a, b) => a - b);
 
 // ---------------------------------------------------------------- chart data (deck and bundle share it)
+// A zero-width space after each hyphen lets a hyphenated name wrap inside its category (renderers break chart
+// labels at spaces only); the visible text is unchanged (F34).
+const wrappableName = (name) => String(name).replace(/-(?!\u200B)/gu, "-\u200B");
 const competencyLabel = (value) => String(value ?? "");
 function chartSpec(item) {
   if (item.family === "range") return { data: { categories: item.items.map((row) => competencyLabel(row.competency)), series: [{ name: "MIN", values: item.items.map((row) => row.min) }, { name: "MAX", values: item.items.map((row) => row.max) }, { name: "MEDIAN", values: item.items.map((row) => row.median) }] }, options: { fixedAxis: true }, band: { id: 2, axis: "y" } };
@@ -1045,8 +1062,8 @@ function chartSpec(item) {
   if (item.family === "population") return { data: { categories: item.rows.map((row) => row.competency), series: [{ name: "Low", values: item.rows.map((row) => row.below / 100) }, { name: "BENCH", values: item.rows.map((row) => row.in / 100) }, { name: "High", values: item.rows.map((row) => row.above / 100) }] }, options: {} };
   if (item.family === "zone") return { data: { categories: item.competencies, series: item.regions.map((region, index) => ({ name: region, values: item.values[index] })) }, options: { fixedAxis: true, categoryColors: ZONE_CATEGORY_COLORS }, band: { id: 2, axis: "y" } };
   if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => row.name), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true }, band: { id: 3, axis: "x" } };
-  if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => row.name), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: columnLabelSize(item.rows) }, band: { ids: [2, 10], axis: "y" } };
-  if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => row.name), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: columnLabelSize(item.rows) }, band: { id: 3, axis: "y" } };
+  if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { ids: [2, 10], axis: "y" } };
+  if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { id: 3, axis: "y" } };
   return null;
 }
 // Rule 10: category labels stay ≥ 10 pt; they step down from the template size only as far as needed.
@@ -1075,6 +1092,12 @@ function fitLabels(labels, { max, width, height, maxLines = 4 }) {
   return 1000;
 }
 const templateLayout = (chartXml) => { const match = chartXml.match(/<c:plotArea><c:layout><c:manualLayout>[\s\S]*?<c:x val="([^"]+)"\/><c:y val="([^"]+)"\/><c:w val="([^"]+)"\/><c:h val="([^"]+)"\/>/u); return match ? { x: Number(match[1]), y: Number(match[2]), w: Number(match[3]), h: Number(match[4]) } : null; };
+/** Lowest plot bottom (fraction of the frame) that leaves the wrapped participant labels above the footer. */
+function labelFloor(item, frame, layout) {
+  const size = (item.labelSize || 1000) / 100; const slot = layout.w * frame.cx / PT / Math.max(1, item.rows.length) * 0.92;
+  const lines = Math.max(1, ...item.rows.map((row) => wrappedLines(String(row.name).replace(/-/gu, "- "), size, slot)));
+  return (FOOTER_TOP - (lines * size * 1.3 + 8) * PT - frame.y) / frame.cy;
+}
 /**
  * Pinned plot areas (F21): the plot area is chosen first (room for the labels, clear of the footer) and the band is
  * placed from that plot area, so the band lands on the benchmark wherever the renderer draws the axis.
@@ -1126,6 +1149,35 @@ function chartLayout(item, chartXml, slideXml, spec) {
       options.dataLabelSize = Math.min(2400, axisLabelSize(chartXml, "dLbls") || 2000);
       const plotTop = frame.y + layout.y * frame.cy; const plotHeight = options.plotLayout.h * frame.cy;
       slide = updateShape(slideXml, 2, (shape) => setVisualBox(shape, { ...visualBox(shape), y: plotTop, cy: plotHeight }));
+    }
+  }
+  if (item.family === "participant-comparison") {
+    // F30: the legend names every competency. Its size steps down to ≥ 10 pt and its box grows (the plot shrinks
+    // from the top) until every entry fits; the bands follow the plot (as on the other pinned charts).
+    const frame = xfrmOf(getShape(slideXml, 6)); const layout = templateLayout(chartXml) || { x: 0.037, y: 0.148, w: 0.963, h: 0.781 };
+    const legendWidth = 0.998 * frame.cx / PT - 20; const names = spec.data.series.map((series) => series.name);
+    const rowsAt = (size) => { let rows = 1; let line = 0; for (const name of names) { const w = name.length * size * 0.55 + size * 2; if (line && line + w > legendWidth) { rows += 1; line = w; } else line += w; } return rows; };
+    const templateHeight = 0.108 * frame.cy / PT; let size = 2000;
+    while (size > 1000 && rowsAt(size / 100) * size / 100 * 1.45 + 10 > templateHeight) size -= 100;
+    const height = Math.max(templateHeight, rowsAt(size / 100) * size / 100 * 1.45 + 10) * PT / frame.cy;
+    const bottom = Math.min(layout.y + layout.h, labelFloor(item, frame, layout)); const plotY = Math.max(layout.y, height + 0.015);
+    options.legendLayout = { x: 0.0015, y: 0.0025, w: 0.998, h: height, size };
+    options.plotLayout = { ...layout, y: plotY, h: bottom - plotY };
+    const plotTop = frame.y + plotY * frame.cy; const plotHeight = (bottom - plotY) * frame.cy;
+    slide = slideXml;
+    for (const id of [2, 10]) slide = updateShape(slide, id, (shape) => setVisualBox(shape, { ...visualBox(shape), y: plotTop + (5 - high) / 4 * plotHeight, cy: (high - low) / 4 * plotHeight }));
+  }
+  if (item.family === "competency-participants") {
+    // The wrapped participant labels must sit above the footer; if they would not, the plot gives up height and the
+    // band follows the plot.
+    const frameShape = getShape(slideXml, 2); const frame = xfrmOf(frameShape); const layout = templateLayout(chartXml);
+    if (layout) {
+      // Room above the plot for the value labels of 5.00 bars, room below for the wrapped names; the band follows the plot.
+      const top = Math.max(layout.y, (axisLabelSize(chartXml, "dLbls") / 100 * 1.9 + 4) * PT / frame.cy);
+      const bottom = Math.min(layout.y + layout.h, labelFloor(item, frame, layout));
+      options.plotLayout = { ...layout, y: top, h: bottom - top };
+      const plotTop = frame.y + top * frame.cy; const plotHeight = options.plotLayout.h * frame.cy;
+      slide = updateShape(slideXml, 3, (shape) => setVisualBox(shape, { ...visualBox(shape), y: plotTop + (5 - high) / 4 * plotHeight, cy: (high - low) / 4 * plotHeight }));
     }
   }
   if (item.family === "population") {
@@ -1616,7 +1668,7 @@ function layoutItem(entry, font) {
         const value = series.values[categoryIndex]; if (value === null || value === undefined) { rowY += 26; return; }
         shapes.push({ type: "rect", x: plotX, y: rowY + 3, w: Math.max(2, scaleX(value) - plotX), h: 18, fill: entry.series.length > 1 ? SERIES_COLORS[seriesIndex % SERIES_COLORS.length] : BHB.navy });
         texts.push({ line: f2(value), x: scaleX(value) + 8, y: rowY + 18, size: 15, color: BHB.ink });
-        if (entry.series.length > 1 && entry.categories.length > 1) texts.push({ line: series.name, x: plotX + 6, y: rowY + 17, size: 12, color: "#FFFFFF", clip: Math.max(0, scaleX(value) - plotX - 12) });
+        // F35: bars carry their value only (outside the bar); series names live in the legend below the chart.
         rowY += 26;
       });
       y = Math.max(rowY, blockTop + labelHeight) + 12;

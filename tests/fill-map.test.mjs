@@ -149,12 +149,12 @@ test("M7–M15 and annex charts are native clones with cache = workbook = <c:f>,
 test("rule 4: bands move with an edited benchmark (t13 band maps 1–5 from the template rectangle)", async () => {
   const edited = await deck(payloadOf(acceptance, { benchmarkLow: "3", benchmarkHigh: "4" }));
   const index = edited.plan.findIndex((item) => item.family === "competency-participants");
-  const original = visualBox(getShape(templateSlides.get(13), 3)); const moved = visualBox(getShape(edited.slides[index], 3));
-  // A two-line title compresses chart and band together (k); the band keeps the 1–5 mapping of its chart.
-  const frameBefore = xfrmOf(getShape(templateSlides.get(13), 2)); const frameAfter = xfrmOf(getShape(edited.slides[index], 2));
-  const k = frameAfter.cy / frameBefore.cy; const top = frameBefore.y; const topAfter = frameAfter.y;
-  const perPoint = original.cy / 0.75 * k;
-  assert(Math.abs(moved.cy - perPoint) < 3); assert(Math.abs(moved.y - (topAfter + (original.y - top) * k - 0.5 * perPoint)) < 3, JSON.stringify({ original, moved, perPoint }));
+  // The band is placed from the chart's pinned plot area (F21): y(v) = plotTop + (5 − v) / 4 × plotHeight.
+  const moved = visualBox(getShape(edited.slides[index], 3)); const frame = xfrmOf(getShape(edited.slides[index], 2));
+  const [{ chart }] = await edited.chartsOf(index);
+  const [y, h] = ["y", "h"].map((name) => Number(chart.match(new RegExp(`<c:plotArea><c:layout><c:manualLayout>[\\s\\S]*?<c:${name} val="([^"]+)"`, "u"))[1]));
+  const plotTop = frame.y + y * frame.cy; const plotHeight = h * frame.cy;
+  assert(Math.abs(moved.y - (plotTop + 1 / 4 * plotHeight)) < 3000 && Math.abs(moved.cy - plotHeight / 4) < 3000, JSON.stringify({ moved, plotTop, plotHeight }));
   const benchmark = edited.slides[edited.plan.findIndex((item) => item.family === "benchmark")];
   assert.equal(text(getShape(benchmark, 19)), "Rezultate raportate la benchmark (3.00-4.00)");
   const range = edited.slides[edited.plan.findIndex((item) => item.family === "range")];
@@ -366,4 +366,27 @@ test("F33: on t7 the longest competency line ends before the mean's right tab", 
       assert(name.length * sizePt * 0.5 * 12700 + (mean.length + 1) * sizePt * 0.5 * 12700 <= tab, `„${name}” runs into its mean`);
     }
   }
+});
+
+const insp5Deck = await deck(payloadOf(insp5, { splitGroups: true }));
+test("F30/F34/F35: A3 legend sized to name every competency; one annex label size per series; wrapped names keep A4 to equal readable pages; bundle bars carry values only", async () => {
+  const comparison = insp5Deck.plan.map((item, index) => [item, index]).filter(([item]) => item.family === "participant-comparison");
+  for (const [item, index] of comparison) {
+    const [{ chart }] = await insp5Deck.chartsOf(index);
+    const legend = chart.match(/<c:legend>[\s\S]*?<\/c:legend>/u)[0];
+    const size = Number(legend.match(/<a:defRPr\b[^>]*\bsz="(\d+)"/u)[1]) / 100; const h = Number(legend.match(/<c:h val="([^"]+)"/u)[1]);
+    const frameCy = 9.82 * 72; const width = 0.998 * 17.94 * 72 - 20;
+    let rows = 1; let line = 0; for (const name of item.competencies) { const w = name.length * size * 0.55 + size * 2; if (line && line + w > width) { rows += 1; line = w; } else line += w; }
+    assert(size >= 10 && h * frameCy >= rows * size * 1.45, `legend ${size} pt × ${rows} rows fits its box`);
+  }
+  for (const family of ["participant-comparison", "competency-participants"]) assert.equal(new Set(insp5Deck.plan.filter((item) => item.family === family).map((item) => item.labelSize)).size, 1, `${family} label size`);
+  const a4 = insp5Deck.plan.filter((item) => item.family === "competency-participants" && item.competencyIndex === 0).map((item) => item.rows.length);
+  assert.deepEqual(a4, [11, 11]);
+  const artifacts = await buildBundleArtifacts(XLSX, payloadOf(insp5, { splitGroups: true }));
+  artifacts.manifest.items.forEach((entry, index) => {
+    if (entry.family !== "participant-comparison") return;
+    const names = new Set(insp5Deck.plan.find((item) => item.family === "participant-comparison").competencies);
+    const nameTexts = artifacts.layouts[index].texts.filter((text) => !text.caption && names.has(text.line));
+    assert(nameTexts.length <= names.size, "series names appear in the legend only, never inside bars");
+  });
 });

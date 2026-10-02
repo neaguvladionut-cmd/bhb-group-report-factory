@@ -41,6 +41,9 @@ export const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "ben
 
 // Rule 10: readable participants per slide, split into the fewest slides, sizes differing by at most one.
 export const PARTICIPANT_START_CAPS = { "participant-mean": 25, "participant-comparison": 5, "competency-participants": 20 };
+// A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
+// segment, and at least a quarter of the whole name (F34).
+export const labelChars = (name) => Math.max(...String(name).split(/[\s-]+/u).map((part) => part.length + 1), Math.ceil(String(name).length / 4));
 export function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } = {}) {
   if (family === "participant-mean") { // horizontal bars on a plot ≈ 8.0 in tall, gap 150 %: label ≥ 10 pt, bar ≥ 0.12 in
     const slot = Math.max(10 * 1.25 / 72, 0.12 * 2.5);
@@ -48,7 +51,7 @@ export function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } =
   }
   const plotWidth = 17.2; // column charts t9 / t13–t17, gap 219 %, overlap −27 %
   const barSlot = 0.12 * (seriesCount * 1.27 - 0.27 + 2.19);
-  const labelSlot = Math.max(1, longestLabel) * 10 * 0.52 / 72 / 2; // a 10 pt label may wrap onto two lines
+  const labelSlot = Math.max(1, longestLabel) * 10 * 0.55 / 72; // longestLabel = labelChars(): a 10 pt label wraps onto ≤ 4 lines
   return Math.max(1, Math.floor(plotWidth / Math.max(barSlot, labelSlot)));
 }
 export function participantsPerSlide(family, options = {}) { return Math.max(1, Math.min(PARTICIPANT_START_CAPS[family] || 20, readableCapacity(family, options))); }
@@ -259,7 +262,7 @@ function appendixSlides(payload) {
   const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "appendix", low: payload.bands.low, high: payload.bands.high, ...data });
   const competencies = (payload.competencies || payload.calculations.map((item) => item.competency)).filter((competency) => payload.records.some((record) => Number.isFinite(record.scores?.[competency])));
   const participants = payload.records.map((record) => ({ name: record.name, mean: overallMean(record), scores: record.scores || {} })).filter((row) => Number.isFinite(row.mean)).sort((a, b) => b.mean - a.mean);
-  const longestLabel = Math.max(0, ...participants.map((row) => row.name.length));
+  const longestLabel = Math.max(0, ...participants.map((row) => labelChars(row.name)));
   add("appendix-divider", { title: "Anexă – rezultate individuale", heading: "Anexă", subheading: "rezultate individuale" });
   const meanPages = splitEqual(participants, participantsPerSlide("participant-mean", { longestLabel }));
   meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length }));
@@ -270,6 +273,13 @@ function appendixSlides(payload) {
     const pages = splitEqual(rows, participantsPerSlide("competency-participants", { longestLabel }));
     pages.forEach((pageRows, page) => add("competency-participants", { title: `Distribuția pe competențe – ${competency}`, competency, competencyIndex, templateIndex: competencyIndex < 5 ? 13 + competencyIndex : 13, recolor: competencyIndex >= 5 ? "FF9D75" : "", rows: pageRows, page: page + 1, pages: pages.length }));
   });
+  // F34: one label size per annex series — the smallest per-page fit (≤ 20 pt, ≥ 10 pt).
+  for (const family of ["participant-comparison", "competency-participants"]) {
+    const pages = slides.filter((slide) => slide.family === family);
+    const fit = (page) => { const slot = 17.2 * 72 / Math.max(1, page.rows.length) * 0.9; const need = Math.max(1, ...page.rows.map((row) => labelChars(row.name))); return Math.max(1000, Math.min(2000, Math.floor(slot / (need * 0.55)) * 100)); };
+    const size = Math.min(2000, ...pages.map(fit));
+    pages.forEach((page) => { page.labelSize = size; });
+  }
   return slides;
 }
 
