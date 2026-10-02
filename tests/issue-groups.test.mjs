@@ -79,10 +79,10 @@ test("200-participant issue card is collapsed and caps expanded rows at eight", 
   card.querySelector("[data-issue-toggle]").click();
   assert.equal(card.dataset.issueExpanded, "true");
   assert.equal(card.querySelectorAll(".issue-item").length, 8);
-  assert.equal(card.querySelector("[data-issue-reveal]").textContent, "Arată toate (160)");
+  assert.equal(card.querySelector("[data-issue-reveal]").textContent, "Arată încă 25 (din 160)");
 });
 
-test("issue search narrows the visible rows and count, then Arată toate reveals the rest", () => {
+test("issue search narrows the visible rows and then reveals the rest in pages", () => {
   const fixture = bigFixture();
   const card = renderIssueGroup(fixture.group, { documentRef: new MiniDocument(), payload: fixture.payload });
   card.querySelector("[data-issue-toggle]").click();
@@ -98,15 +98,15 @@ test("issue search narrows the visible rows and count, then Arată toate reveals
   const reveal = card.querySelector("[data-issue-reveal]");
   reveal.click();
   assert.equal(card.querySelectorAll(".issue-item").length, 25);
-  assert.equal(reveal.textContent, "Arată următoarele 25 (50 din 160)");
+  assert.equal(reveal.textContent, "Arată încă 25 (din 160)");
 
   reveal.click();
   assert.equal(card.querySelectorAll(".issue-item").length, 25);
-  assert.equal(reveal.textContent, "Arată următoarele 25 (75 din 160)");
+  assert.equal(reveal.textContent, "Arată încă 25 (din 160)");
 
   for (let page = 0; page < 6; page += 1) reveal.click();
   assert.equal(card.querySelectorAll(".issue-item").length, 8);
-  assert.equal(reveal.textContent, "Arată toate (160)");
+  assert.equal(reveal.textContent, "Arată încă 25 (din 160)");
 });
 
 test("the served app bundle defines every issue helper it calls", async () => {

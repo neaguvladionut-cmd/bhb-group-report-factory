@@ -88,7 +88,7 @@ export function renderIssueGroup(group, { documentRef = document, payload = null
     const canReveal = expanded && filtered.length > rowLimit;
     if (reveal) {
       reveal.hidden = !canReveal;
-      reveal.textContent = showAll ? (page + 1) * pageSize < filtered.length ? `Arată următoarele 25 (${Math.min(filtered.length, (page + 2) * pageSize)} din ${filtered.length})` : "Arată mai puține" : `Arată toate (${filtered.length})`;
+      reveal.textContent = showAll ? (page + 1) * pageSize < filtered.length ? "Arată încă 25 (din " + filtered.length + ")" : "Arată mai puține" : "Arată încă 25 (din " + filtered.length + ")";
     }
   };
 
