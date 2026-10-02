@@ -97,6 +97,19 @@ test("participants without CODE raise one grouped warning, not one per participa
   assert.equal(codeWarnings[0].identities.length, 10);
 });
 
+test("GRF-UX scale fixture keeps 155 identical blockers on one bounded, searchable kind card", async () => {
+  const rows = [["CODE", "name", "cod cp", "Leadership"]];
+  for (let index = 1; index <= 200; index += 1) rows.push(["North", `Synthetic participant ${String(index).padStart(3, "0")}`, `S-${index}`, index <= 155 ? 9 : 3]);
+  const payload = buildPayload(XLSX, [{ name: "summary-export-synthetic.xlsx", bytes: workbook(rows) }], { projectName: "Synthetic scale fixture" });
+  assert.equal(payload.blockers.filter((item) => item.code === "summary-score").length, 155);
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  const css = await readFile(resolve(root, "src/styles.css"), "utf8");
+  assert.match(app, /groupedIssues\(blockers, "blocker"\)/u);
+  assert.match(app, /data-issue-search/u);
+  assert.match(css, /\.issue-items\{[^}]*max-height:205px/u);
+  assert.match(css, /\.issue-items\{[^}]*overflow:auto/u);
+});
+
 test("R5 by mean (Vlad 2026-10-02): complete data keeps the sum order; missing scores rank by mean; spread then column order break ties", async () => {
   const { topOrder } = await import("../src/rebuild-report-plan.js");
   const row = (behavior, scores, sourceIndex) => { const present = scores.filter((value) => value !== null); return { competency: "C", behavior, sourceIndex, n: present.length, sum: present.reduce((a, b) => a + b, 0), mean: present.reduce((a, b) => a + b, 0) / present.length, pct2: present.filter((v) => v === 2).length / present.length, pct0: present.filter((v) => v === 0).length / present.length }; };

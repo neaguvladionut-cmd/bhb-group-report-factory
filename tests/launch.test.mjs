@@ -5,22 +5,35 @@ import test from "node:test";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 
-test("deploy is a classic offline entry with the Trend rebuild controls", async () => {
+test("deploy is the source-owned one-page Romanian builder with the approved four-step spine", async () => {
   const source = await readFile(resolve(root, "src/rebuild-index.html"), "utf8");
   const deploy = await readFile(resolve(root, "deploy/index.html"), "utf8");
   const app = await readFile(resolve(root, "deploy/app.js"), "utf8");
   const css = await readFile(resolve(root, "deploy/styles.css"), "utf8");
   assert.equal(deploy, await readFile(resolve(root, "src/rebuild-index.html"), "utf8"));
   assert.match(deploy, /id="split-groups"/u);
-  assert.match(deploy, /id="annex-setting"/u);
+  assert.match(deploy, /name="annex"/u);
   assert.match(deploy, /evaluation-sheet-template\.csv/u);
   assert.match(deploy, /id="bundle"/u);
   assert.match(deploy, /id="download-fallback"/u);
+  assert.equal((deploy.match(/class="workflow-section/g) || []).length, 4);
+  assert.ok((deploy.match(/class="field-context"/gu) || []).length >= 6);
+  assert.match(deploy, /Ce faci aici/u);
+  assert.match(deploy, /Ce urmează/u);
+  assert.match(deploy, /Apare în/u);
+  assert.match(deploy, /Pachet BHB \(ZIP\)/u);
+  const visibleCopy = deploy.replace(/<[^>]+>/gu, " ");
+  assert.doesNotMatch(visibleCopy, /\b(?:schema|upload|API)\b/iu);
   assert.match(app, /downloadBundle/u);
   assert.match(app, /downloadPptx/u);
+  assert.match(app, /groupedIssues\(blockers, "blocker"\)/u);
+  assert.match(app, /data-issue-search/u);
+  assert.match(app, /Confirmă toate avertismentele/u);
   assert.doesNotMatch(app, /PptxGenJS/u);
-  assert.match(css, /\.workspace\{/u);
-  assert.match(source, /Trend este singurul PPTX/u);
+  assert.match(css, /\.issue-items\{[^}]*max-height:205px/u);
+  assert.match(css, /\.workflow-rail\{/u);
+  assert.match(source, /id="step-upload"/u);
+  assert.match(source, /id="step-download"/u);
   const scripts = [...deploy.matchAll(/<script(?:(?:\s+src="([^"]+)")?)>([\s\S]*?)<\/script>/gu)];
   assert.equal(scripts.length, 5);
   for (const [, src] of scripts) if (src) await access(resolve(root, "deploy", src.split("?")[0]));
