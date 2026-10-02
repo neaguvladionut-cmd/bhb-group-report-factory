@@ -62,7 +62,7 @@ const methodFacts = (rows, headerRow) => {
   const evaluatorIndexes = ["principal evaluator", "secondary evaluator", "evaluator 3", "evaluator 4", "evaluatori"].map((name) => header.indexOf(name)).filter((index) => index >= 0);
   const evaluators = [...new Set(rows.slice(headerRow + 1).flatMap((row) => evaluatorIndexes.flatMap((index) => splitPeople(row[index]))))];
   const teamSizes = rows.slice(headerRow + 1).map((row) => new Set(evaluatorIndexes.flatMap((index) => splitPeople(row[index]))).size).filter(Boolean);
-  const dates = [...new Set(values("date").map(romanianDate).filter(Boolean))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
+  const dates = [...new Set([...values("date"), ...values("invited at")].map(romanianDate).filter(Boolean))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
   const location = [...new Set(values("certification location"))];
   const jobIndex = header.indexOf("job");
   const populationByRole = jobIndex < 0 ? [] : [...new Map(rows.slice(headerRow + 1).map((row) => text(row[jobIndex])).filter((role) => role && !/^x$/iu.test(role)).map((role) => [role, 0])).entries()].map(([role]) => ({ role, count: rows.slice(headerRow + 1).filter((row) => text(row[jobIndex]) === role).length }));

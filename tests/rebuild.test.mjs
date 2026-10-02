@@ -141,3 +141,10 @@ test("R5 by mean in a group view ranks the group's own scores", () => {
   const audit = createAuditWorkbook(XLSX, payload);
   assert.equal(JSON.stringify(XLSX.utils.sheet_to_json(audit.Sheets.Clasament, { header: 1 })[0].slice(0, 5)), JSON.stringify(["Competență", "Comportament", "Medie 0–2", "% scor 2", "% scor 0"]));
 });
+
+test("assessment days count „invited at” dates when the export has no „date” column", () => {
+  const rows = [["CODE", "name", "invited at", "cod cp", "Leadership"], ["", "Synthetic Ana", "11-05-2026", "A-1", 3], ["", "Synthetic Bob", "12-05-2026", "A-2", 3], ["", "Synthetic Cia", "12-05-2026", "A-3", 3]];
+  const payload = buildPayload(XLSX, [{ name: "invited-summary.xlsx", bytes: workbook(rows) }], { projectName: "Invited synthetic" });
+  const dates = new Set((payload.schemas || []).flatMap((schema) => schema.methodology?.dates || []));
+  assert.equal(dates.size, 2);
+});

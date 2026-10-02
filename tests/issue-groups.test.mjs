@@ -116,3 +116,9 @@ test("the served app bundle defines every issue helper it calls", async () => {
     if (/\b/.test(name) && bundle.includes(`${name}(`)) assert.match(bundle, new RegExp(`function ${name}\\b|${name}[,}]`), `${name} is called but never defined in deploy/app.js`);
   }
 });
+
+test("the served bundle embeds the Poppins font so the BHB bundle works from a local file", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const bundle = await readFile(new URL("../deploy/app.js", import.meta.url), "utf8");
+  assert.match(bundle, /window\.__GRF_FONT_BASE64__="[A-Za-z0-9+/=]{1000,}"/u);
+});

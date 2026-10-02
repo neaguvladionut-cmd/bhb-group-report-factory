@@ -82,8 +82,8 @@ test("GRF-UX methodology derives real dates, teams, roles and location from deta
     ["CODE", "name the person evaluated", "job", "regiune", "cod ac", "Competente", "date", "invited at", "certification location", "principal evaluator", "secondary evaluator", "evaluator 3", "Evaluatori", "Leadership"],
     ["", "", "", "", "", "Subcompetente", "", "", "", "", "", "", "", "L"],
     ["", "", "", "", "", "behavior", "", "", "", "", "", "", "", "Behavior one"],
-    ["North", "Synthetic Ana", "Manager", "Nord", "A-1", "", "2026-10-01", "2026-09-29", "București", "Ana", "Mihai", "Sistem AC", "", 2],
-    ["South", "Synthetic Bogdan", "Specialist", "Sud", "A-2", "", "2026-10-02", "2026-09-30", "București", "Ana", "Mihai", "System user", "", 1]
+    ["North", "Synthetic Ana", "Manager", "Nord", "A-1", "", "2026-10-01", "2026-10-01", "București", "Ana", "Mihai", "Sistem AC", "", 2],
+    ["South", "Synthetic Bogdan", "Specialist", "Sud", "A-2", "", "2026-10-02", "2026-10-02", "București", "Ana", "Mihai", "System user", "", 1]
   ]);
   const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: summary }, { name: "detail.xlsx", bytes: detailedWithMethodology }], { projectName: "Proiect sintetic", program: "Centru de Dezvoltare", reportDate: "2026-10-01" });
   assert.deepEqual(payload.methodology.evaluatorNames, ["Ana", "Mihai"]);
