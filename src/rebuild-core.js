@@ -45,23 +45,84 @@ function rowsFromWorkbook(XLSX, bytes, sourceName = "") {
 }
 
 const findHeader = (rows, predicate) => rows.findIndex((row) => predicate(row.map(folded)));
-const methodFacts = (rows, headerRow) => {
+const splitPeople = (value) => text(value).split(/[,;/]/u).map(text).filter(Boolean).filter((name) => !/(?:sistem|system)/iu.test(name));
+const excelDate = (value) => {
+  const raw = typeof value === "number" ? value : /^\d{4,}(?:\.\d+)?$/u.test(text(value)) ? Number(value) : null;
+  if (Number.isFinite(raw)) {
+    const date = new Date(Date.UTC(1899, 11, 30) + raw * 86400000);
+    if (Number.isFinite(date.getTime())) return date;
+  }
+  return value instanceof Date ? value : null;
+};
+const romanianDate = (value) => {
+  const date = excelDate(value);
+  if (date) return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(date);
+  const raw = text(value);
+  const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T].*)?$/u);
+  if (iso) return [iso[3].padStart(2, "0"), iso[2].padStart(2, "0"), iso[1]].join(".");
+  const dmy = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})(?:[ T].*)?$/u);
+  return dmy ? [dmy[1].padStart(2, "0"), dmy[2].padStart(2, "0"), dmy[3]].join(".") : raw;
+};
+const methodFacts = (rows, headerRow, sourceName = "") => {
   const header = (rows[headerRow] || []).map(folded);
-  const values = (name) => { const index = header.indexOf(name); return index < 0 ? [] : rows.slice(headerRow + 1).map((row) => text(row[index])).filter(Boolean); };
+  const values = (name) => { const index = header.indexOf(name); return index < 0 ? [] : rows.slice(headerRow + 1).map((row) => row[index]).filter((value) => text(value)); };
   const evaluatorIndexes = ["principal evaluator", "secondary evaluator", "evaluator 3", "evaluator 4", "evaluatori"].map((name) => header.indexOf(name)).filter((index) => index >= 0);
-  const teamSizes = rows.slice(headerRow + 1).map((row) => new Set(evaluatorIndexes.flatMap((index) => text(row[index]).split(/[,;/]/u).map(text).filter(Boolean))).size).filter(Boolean);
-  return { evaluators: ["principal evaluator", "secondary evaluator", "evaluator 3", "evaluator 4", "evaluatori"].flatMap(values), dates: [...values("invited at"), ...values("date")], locations: [...values("certification location"), ...values("regiune")], teamSizes };
+  const dateIndexes = ["date", "invited at"].map((name) => header.indexOf(name)).filter((index) => index >= 0);
+  const nameIndex = ["name", "name the person evaluated"].map((name) => header.indexOf(name)).find((index) => index >= 0) ?? -1;
+  const assessmentIndex = ["cod cp", "cod ac"].map((name) => header.indexOf(name)).find((index) => index >= 0) ?? -1;
+  const methodologyRows = rows.slice(headerRow + 1).map((row, rowIndex) => {
+    const participantName = nameIndex >= 0 ? text(row[nameIndex]) : "";
+    const assessment = assessmentIndex >= 0 ? text(row[assessmentIndex]) : "";
+    const evaluatorNames = [...new Set(evaluatorIndexes.flatMap((index) => splitPeople(row[index])))];
+    const dates = [...new Set(dateIndexes.map((index) => romanianDate(row[index])).filter(Boolean))];
+    const locations = [...new Set([text(row[header.indexOf("certification location")])].filter(Boolean))];
+    const role = text(row[header.indexOf("job")]);
+    if (!participantName && !assessment && !evaluatorNames.length && !dates.length && !locations.length && !role) return null;
+    return { identity: participantName || assessment ? key(participantName, assessment) : sourceName + ":" + rowIndex, evaluatorNames, dates, locations, role };
+  }).filter(Boolean);
+  const evaluators = [...new Set(methodologyRows.flatMap((row) => row.evaluatorNames))];
+  const teamSizes = methodologyRows.map((row) => row.evaluatorNames.length).filter(Boolean);
+  const dates = [...new Set(methodologyRows.flatMap((row) => row.dates))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
+  const location = [...new Set(methodologyRows.flatMap((row) => row.locations))];
+  const jobIndex = header.indexOf("job");
+  const populationByRole = jobIndex < 0 ? [] : [...new Map(rows.slice(headerRow + 1).map((row) => text(row[jobIndex])).filter((role) => role && !/^x$/iu.test(role)).map((role) => [role, 0])).entries()].map(([role]) => ({ role, count: rows.slice(headerRow + 1).filter((row) => text(row[jobIndex]) === role).length }));
+  return { evaluators, dates, locations: location, teamSizes, populationByRole, methodologyRows };
 };
 
 export function detectSchema(XLSX, bytes, sourceName = "export.xlsx") {
   const { sheetName, rows } = rowsFromWorkbook(XLSX, bytes, sourceName);
   const summary = findHeader(rows, (header) => header.includes("name") && header.includes("cod cp") && header.some((value) => value && !["code", "name", "cod cp", "job", "email"].includes(value)));
-  if (summary >= 0) return { kind: "ac-summary-1-5", sourceName, sheetName, headerRow: summary + 1, rows, methodology: methodFacts(rows, summary) };
+  if (summary >= 0) return { kind: "ac-summary-1-5", sourceName, sheetName, headerRow: summary + 1, rows, methodology: methodFacts(rows, summary, sourceName) };
   const detailed = findHeader(rows, (header) => header.includes("name the person evaluated") && header.includes("cod ac") && header.includes("competente"));
-  if (detailed >= 0) return { kind: "ac-detailed-0-2", sourceName, sheetName, headerRow: detailed + 1, rows, methodology: methodFacts(rows, detailed) };
+  if (detailed >= 0) return { kind: "ac-detailed-0-2", sourceName, sheetName, headerRow: detailed + 1, rows, methodology: methodFacts(rows, detailed, sourceName) };
   const descriptors = findHeader(rows, (header) => EVAL_SHEET_HEADERS.every((name) => header.includes(name)));
   if (descriptors >= 0) return { kind: "devplan-descriptors", sourceName, sheetName, headerRow: descriptors + 1, rows, methodology: { evaluators: [], dates: [], locations: [], teamSizes: [] } };
-  return { kind: "unsupported", sourceName, sheetName, headerRow: 0, rows, methodology: methodFacts(rows, 0) };
+  return { kind: "unsupported", sourceName, sheetName, headerRow: 0, rows, methodology: methodFacts(rows, 0, sourceName) };
+}
+
+function mergeMethodology(schemas) {
+  const participants = new Map();
+  for (const schema of schemas) for (const [index, row] of (schema.methodology?.methodologyRows || []).entries()) {
+    const identity = row.identity || schema.sourceName + ":" + index;
+    const current = participants.get(identity) || { identity, evaluatorNames: [], dates: [], locations: [], role: "" };
+    current.evaluatorNames = [...new Set([...current.evaluatorNames, ...(row.evaluatorNames || [])])];
+    current.dates = [...new Set([...current.dates, ...(row.dates || [])])];
+    current.locations = [...new Set([...current.locations, ...(row.locations || [])])];
+    current.role ||= row.role || "";
+    participants.set(identity, current);
+  }
+  const rows = [...participants.values()];
+  const dates = [...new Set(rows.flatMap((row) => row.dates))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
+  const roleCounts = new Map();
+  for (const row of rows) if (row.role && !/^x$/iu.test(row.role)) roleCounts.set(row.role, (roleCounts.get(row.role) || 0) + 1);
+  return {
+    evaluators: [...new Set(rows.flatMap((row) => row.evaluatorNames))],
+    dates,
+    locations: [...new Set(rows.flatMap((row) => row.locations))],
+    teamSizes: rows.map((row) => row.evaluatorNames.length).filter(Boolean),
+    populationByRole: [...roleCounts.entries()].map(([role, count]) => ({ role, count })),
+    methodologyRows: rows
+  };
 }
 
 function summaryColumns(header) {
@@ -305,6 +366,21 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const descriptorWarnings = [];
   const aggregates = behaviorAggregates(parsedDetailed.behaviorRecords, includedIdentities, descriptors, descriptorWarnings);
   warnings.push(...descriptorWarnings);
+  const methodologySource = mergeMethodology([...summaries, ...detailedSources]);
+  const teamSizeCounts = new Map();
+  for (const size of methodologySource.teamSizes || []) teamSizeCounts.set(size, (teamSizeCounts.get(size) || 0) + 1);
+  const commonTeamSize = [...teamSizeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || null;
+  const includedRoleCounts = new Map();
+  for (const row of methodologySource.methodologyRows || []) if (includedIdentities.has(row.identity) && row.role && !/^x$/iu.test(row.role)) includedRoleCounts.set(row.role, (includedRoleCounts.get(row.role) || 0) + 1);
+  const methodology = {
+    evaluatorNames: methodologySource.evaluators || [],
+    dates: methodologySource.dates || [],
+    period: methodologySource.dates?.length ? { first: methodologySource.dates[0], last: methodologySource.dates.at(-1) } : null,
+    teamSizes: methodologySource.teamSizes || [],
+    commonTeamSize,
+    locations: methodologySource.locations || [],
+    populationByRole: [...includedRoleCounts.entries()].map(([role, count]) => ({ role, count }))
+  };
   const acknowledged = new Set(reviewState.acknowledgedWarningIds || []);
   const finalWarnings = warnings.map((item) => ({ ...item, reviewed: acknowledged.has(item.id) }));
   const groups = codeValues.map((code) => ({ code, name: code, records: records.filter((record) => record.code === code) }));
@@ -315,7 +391,7 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
     calculationVersion: CALCULATION_VERSION,
     createdAt: new Date().toISOString(),
     metadata: { ...metadata, projectName: text(metadata.projectName), clientName: text(metadata.clientName), reportDate: text(metadata.reportDate), annex: metadata.annex || "end", splitGroups: Boolean(metadata.splitGroups), groupNames: metadata.groupNames || {}, slideToggles: metadata.slideToggles || {} },
-    schemas, sourceShape: { summary: summaries.length, detailed: detailedSources.length, descriptors: descriptorSources.length }, competencies: parsedSummary.competencies, records, auditRecords, behaviorRecords: parsedDetailed.behaviorRecords, behaviorAggregates: aggregates,
+    schemas, methodology, sourceShape: { summary: summaries.length, detailed: detailedSources.length, descriptors: descriptorSources.length }, competencies: parsedSummary.competencies, records, auditRecords, behaviorRecords: parsedDetailed.behaviorRecords, behaviorAggregates: aggregates,
     calculations, groups, zones, zoneCalculations, codeReadiness: { available: codeValues.length, blank: codeMissing.length, groups: codeValues, splitAvailable: codeValues.length >= 2 }, regionReadiness: { available: zones.length, blank: regionMissing.length, disabledReason: zones.length ? "" : "Nu există valori de regiune în exportul detaliat." },
     participantCounts: { total: parsedSummary.records.length, included: records.length, excludedUnrated: parsedSummary.records.filter((record) => record.inclusion === "excluded-unrated").length }, bands, blockers, warnings: finalWarnings, warningReviews: finalWarnings, corrections: Object.values(corrections.values || {}).filter((item) => item?.mode === "value"), readiness: blockers.length === 0 && finalWarnings.every((item) => item.reviewed), descriptorTemplate
   };

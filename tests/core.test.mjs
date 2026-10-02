@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import test from "node:test";
 import { buildPayload, createAuditWorkbook, EVAL_SHEET_HEADERS, mergeSelectedFiles } from "../src/rebuild-core.js";
+import { methodologyColumns, reportPlan } from "../src/rebuild-report-plan.js";
+import { createMetaFixture } from "./fixtures/grf-ux-meta-fixture.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const vendor = await readFile(resolve(root, "src/assets/vendor/xlsx.full.min.js"), "utf8");
@@ -74,4 +76,83 @@ test("selected file merge replaces same-name selections and preserves other file
   const replacement = { name: "SUMMARY.xlsx", bytes: new Uint8Array([3]) };
   assert.deepEqual(mergeSelectedFiles(mergeSelectedFiles([], [first]), [second]), [first, second]);
   assert.deepEqual(mergeSelectedFiles([first, second], [replacement]), [replacement, second]);
+});
+
+test("GRF-UX methodology derives real dates, teams, roles and location from detailed export", () => {
+  const detailedWithMethodology = workbook([
+    ["CODE", "name the person evaluated", "job", "regiune", "cod ac", "Competente", "date", "invited at", "certification location", "principal evaluator", "secondary evaluator", "evaluator 3", "Evaluatori", "Leadership"],
+    ["", "", "", "", "", "Subcompetente", "", "", "", "", "", "", "", "L"],
+    ["", "", "", "", "", "behavior", "", "", "", "", "", "", "", "Behavior one"],
+    ["North", "Synthetic Ana", "Manager", "Nord", "A-1", "", "2026-10-01", "2026-10-01", "București", "Ana", "Mihai", "Sistem AC", "", 2],
+    ["South", "Synthetic Bogdan", "Specialist", "Sud", "A-2", "", "2026-10-02", "2026-10-02", "București", "Ana", "Mihai", "System user", "", 1]
+  ]);
+  const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: summary }, { name: "detail.xlsx", bytes: detailedWithMethodology }], { projectName: "Proiect sintetic", program: "Centru de Dezvoltare", reportDate: "2026-10-01" });
+  assert.deepEqual(payload.methodology.evaluatorNames, ["Ana", "Mihai"]);
+  assert.deepEqual(payload.methodology.dates, ["01.10.2026", "02.10.2026"]);
+  assert.equal(payload.methodology.commonTeamSize, 2);
+  assert.deepEqual(payload.methodology.populationByRole, [{ role: "Manager", count: 1 }, { role: "Specialist", count: 1 }]);
+  assert.deepEqual(payload.methodology.locations, ["București"]);
+  const method = methodologyColumns(payload);
+  assert(method.left.some((line) => /Fiecare participant a fost observat de o echipă formată din 2 consultanți/u.test(line)));
+  assert(method.left.some((line) => /2 participanți \(1 Manager, 1 Specialist\)/u.test(line)));
+  assert(method.left.some((line) => /01\.10\.2026 – 02\.10\.2026/u.test(line)));
+  const cover = reportPlan(payload)[0];
+  assert.equal(cover.title, "Proiect sintetic – Centru de Dezvoltare");
+  assert.equal(cover.reportDate, "01.10.2026");
+});
+
+test("GRF-UX role counts exclude participants without included summary scores", () => {
+  const summaryWithUnrated = workbook([
+    ["CODE", "name", "cod cp", "Leadership"],
+    ["North", "Synthetic Ana", "A-1", 4],
+    ["South", "Synthetic Bogdan", "A-2", 3],
+    ["West", "Synthetic Cia", "A-3", ""]
+  ]);
+  const detailedWithRoles = workbook([
+    ["CODE", "name the person evaluated", "job", "regiune", "cod ac", "Competente", "Leadership"],
+    ["", "", "", "", "", "Subcompetente", "L"],
+    ["", "", "", "", "", "behavior", "Behavior one"],
+    ["North", "Synthetic Ana", "Manager", "Nord", "A-1", "", 2],
+    ["South", "Synthetic Bogdan", "Specialist", "Sud", "A-2", "", 1],
+    ["West", "Synthetic Cia", "Director", "Vest", "A-3", "", 0]
+  ]);
+  const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: summaryWithUnrated }, { name: "detail.xlsx", bytes: detailedWithRoles }], { projectName: "Roluri sintetice" });
+  assert.equal(payload.participantCounts.included, 2);
+  assert.deepEqual(payload.methodology.populationByRole, [{ role: "Manager", count: 1 }, { role: "Specialist", count: 1 }]);
+  assert.equal(payload.methodology.populationByRole.reduce((sum, item) => sum + item.count, 0), payload.participantCounts.included);
+});
+
+test("GRF-UX methodology accepts Excel serials and text dates with time, reduced to calendar days", () => {
+  const serial = (year, month, day, fraction = 0) => (Date.UTC(year, month - 1, day) - Date.UTC(1899, 11, 30)) / 86400000 + fraction;
+  const summaryRows = [["CODE", "name", "cod cp", "Leadership"], ["", "Synthetic Ana", "A-1", 3], ["", "Synthetic Bogdan", "A-2", 3], ["", "Synthetic Cia", "A-3", 3]];
+  const detailedRows = [
+    ["CODE", "name the person evaluated", "regiune", "cod ac", "Competente", "job", "date", "invited at", "certification location", "principal evaluator", "secondary evaluator", "Leadership"],
+    ["", "", "", "", "Subcompetențe", "", "", "", "", "", "", "L"],
+    ["", "", "", "", "behavior", "", "", "", "", "", "", "Behavior one"],
+    ["", "Synthetic Ana", "Nord", "A-1", "", "Manager", "10.03.2026 09:30", serial(2026, 3, 10, 0.4), "Hotel Sintetic", "Ana Pop", "Mihai Ionescu", 2],
+    ["", "Synthetic Bogdan", "Sud", "A-2", "", "Manager", "2026-03-11 14:00:00", serial(2026, 3, 11, 0.6), "Hotel Sintetic", "Ana Pop", "Mihai Ionescu", 1],
+    ["", "Synthetic Cia", "Centru", "A-3", "", "Specialist", "12.03.2026", serial(2026, 3, 12, 0.2), "Hotel Sintetic", "Ana Pop", "Mihai Ionescu", 2]
+  ];
+  const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: workbook(summaryRows) }, { name: "detail.xlsx", bytes: workbook(detailedRows) }], { projectName: "Date sintetice" });
+  assert.deepEqual(payload.methodology.dates, ["10.03.2026", "11.03.2026", "12.03.2026"]);
+  assert.equal(payload.methodology.period.first, "10.03.2026");
+  assert.equal(payload.methodology.period.last, "12.03.2026");
+  assert.equal(payload.methodology.commonTeamSize, 2);
+});
+
+test("GRF-UX methodology merges and de-duplicates facts from summary and detailed exports", () => {
+  const summaryMetadata = createMetaFixture(XLSX, "s");
+  const detailedMetadata = createMetaFixture(XLSX, "d");
+  const payload = buildPayload(XLSX, [
+    { name: "meta-s-sinteza.xlsx", bytes: summaryMetadata.summary },
+    { name: "meta-d-detaliat.xlsx", bytes: detailedMetadata.detailed }
+  ], { projectName: "Meta sintetic" });
+  assert.deepEqual(payload.methodology.evaluatorNames, ["Ion Ionescu", "Radu Vlad", "Ana Pop", "Maria Dan"]);
+  assert.equal(payload.methodology.commonTeamSize, 2);
+  assert.deepEqual(payload.methodology.dates, ["10.03.2026", "11.03.2026", "12.03.2026"]);
+  assert.deepEqual(payload.methodology.populationByRole, [{ role: "Manager vânzări", count: 12 }, { role: "Specialist suport", count: 8 }]);
+  assert.deepEqual(payload.methodology.locations, ["Hotel Sintetic, Brașov"]);
+  const method = methodologyColumns({ ...payload, metadata: { ...payload.metadata, populationByRole: "20 participanți (12 Manager vânzări, 8 Specialist suport)" } });
+  assert.equal(method.facts[0].text, "20 participanți (12 Manager vânzări, 8 Specialist suport)");
+  assert.equal(method.facts.filter((fact) => fact.text.includes("participanți")).length, 1);
 });

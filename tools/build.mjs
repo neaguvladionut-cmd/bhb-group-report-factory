@@ -27,6 +27,13 @@ try {
 } catch {
   console.warn("cleaned Trend template missing; deploy will require /src/assets/trend/template-raport-de-grup-RO.pptx");
 }
+try {
+  // Embedded like the template so the BHB bundle also works when the page is opened as a local file (Safari blocks file:// fetch).
+  const font = await readFile(resolve(source, "assets/vendor/Poppins-Regular.ttf"));
+  templateBootstrap += `window.__GRF_FONT_BASE64__=${JSON.stringify(font.toString("base64"))};`;
+} catch {
+  console.warn("Poppins font missing; the BHB bundle will need to fetch it");
+}
 const appSource=(await readFile(resolve(source,"rebuild-app.js"),"utf8")).replace(/^import[^;\r\n]+;\r?\n/gmu,"").replace(/^export /gmu,"");
 const bundle=[
   templateBootstrap,
@@ -35,7 +42,8 @@ const bundle=[
   await moduleSource("trend-fill.js"),
   await moduleSource("template-pptx.js"),
   await moduleSource("preview.js"),
-  `(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,reportPlan,unrankedCompetencies}=window.__grf;\n${appSource}\n})();`
+  await moduleSource("rebuild-issues.js"),
+  `(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,renderIssueGroup,reportPlan,unrankedCompetencies}=window.__grf;\n${appSource}\n})();`
 ].join("\n\n");
 await writeFile(resolve(deploy,"app.js"),bundle);
 const servedEntries = ["app.js", "core.js", "cover-preview.css", "index.html", "pptx.js", "preview.js", "report-plan.js", "styles.css", "assets"];

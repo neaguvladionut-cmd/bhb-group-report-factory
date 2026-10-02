@@ -24,6 +24,8 @@ const EMU = 914400;
 const payloadOf = (fixture, metadata = {}) => buildPayload(XLSX, [{ name: "summary.xlsx", bytes: fixture.summary }, { name: "detail.xlsx", bytes: fixture.detailed }, { name: "evaluation-sheet-template.csv", bytes: fixture.csv }], { ...fixture.metadata, reportDate: "2026-10-01", ...metadata }, {}, { acknowledgedWarningIds: [] });
 const acceptance = acceptanceFixture(XLSX); const varied = variedFixture(XLSX);
 const template = await JSZip.loadAsync(await readFile(asset));
+const presentation = await template.file("ppt/presentation.xml").async("string");
+const slideSize = Object.fromEntries(["cx", "cy"].map((name) => [name, Number(presentation.match(new RegExp(`<p:sldSz\\b[^>]*\\b${name}=\"(\\d+)\"`, "u"))[1])]));
 const templateSlides = new Map(); for (let index = 1; index <= 22; index += 1) templateSlides.set(index, await template.file(`ppt/slides/slide${index}.xml`).async("string"));
 const shapeIds = (xml) => [...xml.matchAll(/<p:cNvPr\b[^>]*\bid="(\d+)"[^>]*\bname="([^"]*)"/gu)].map((match) => ({ id: match[1], name: decode(match[2]) }));
 const relationships = (xml) => [...xml.matchAll(/<Relationship\b([^>]*)\/>/gu)].map((match) => Object.fromEntries([...match[1].matchAll(/(Id|Type|Target)="([^"]*)"/gu)].map((part) => [part[1], part[2]])));
@@ -39,6 +41,43 @@ async function deck(payload, scope = "whole") {
 const whole = await deck(payloadOf(acceptance, { splitGroups: false, annex: "end" }));
 const split = await deck(payloadOf(acceptance, { splitGroups: true, annex: "end" }));
 const variedDeck = await deck(payloadOf(varied, { splitGroups: true, annex: "end" }));
+const separateMain = await deck(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), "main");
+const separateAppendix = await deck(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), "appendix");
+
+const mediaFrames = (xml) => [...xml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)].filter((match) => match[1] === "pic" || /<c:chart\b/u.test(match[0])).map((match) => {
+  const shape = match[0]; const box = xfrmOf(shape);
+  return { kind: match[1], id: match[2], x: box.x, y: box.y, cx: box.cx, cy: box.cy };
+});
+const allFrames = (xml) => [...xml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)].map((match) => {
+  const box = xfrmOf(match[0]); return { kind: match[1], id: match[2], x: box.x, y: box.y, cx: box.cx, cy: box.cy };
+});
+const bounded = ({ x, y, cx, cy, ...rest }) => ({ ...rest, x: Math.max(0, x), y: Math.max(0, y), cx: Math.min(slideSize.cx, x + cx) - Math.max(0, x), cy: Math.min(slideSize.cy, y + cy) - Math.max(0, y) });
+
+test("GRF-PX: every chart and picture frame is EMU-exact to its template except at slide bounds", () => {
+  for (const [label, generated] of [["whole", whole], ["split", split], ["separate main", separateMain], ["separate appendix", separateAppendix], ["varied", variedDeck]]) {
+    generated.plan.forEach((item, index) => {
+      assert.deepEqual(mediaFrames(generated.slides[index]), mediaFrames(templateSlides.get(item.templateIndex)).map(bounded), `${label} slide ${index + 1} (${item.family}) media frame`);
+    });
+  }
+});
+
+test("GRF-PX: every picture and graphicFrame on every generated slide is within the slide", () => {
+  for (const [label, generated] of [["whole", whole], ["split", split], ["separate main", separateMain], ["separate appendix", separateAppendix], ["varied", variedDeck]]) {
+    generated.slides.forEach((xml, index) => allFrames(xml).forEach((frame) => {
+      assert(frame.x >= 0 && frame.y >= 0 && frame.x + frame.cx <= slideSize.cx && frame.y + frame.cy <= slideSize.cy, `${label} slide ${index + 1} ${frame.kind} ${frame.id} is out of bounds`);
+    }));
+  }
+});
+
+test("GRF-PX: overhanging pictures carry the matching source crop", () => {
+  const crop = (xml, id) => {
+    const shape = getShape(xml, id); const attrs = shape.match(/<a:srcRect\b([^>]*)\/?>(?:<\/a:srcRect>)?/u)?.[1] || "";
+    return Object.fromEntries(["l", "t", "r", "b"].map((name) => [name, Number(attrs.match(new RegExp(`\\b${name}=\"(-?\\d+)\"`, "u"))[1])]));
+  };
+  const cover = whole.slides[0]; const legend = whole.slides[whole.plan.findIndex((item) => item.templateIndex === 4)];
+  assert.deepEqual(crop(cover, 11), { l: 10448, t: 2151, r: 29864, b: 613 });
+  assert.deepEqual(crop(legend, 8), { l: 8874, t: 21593, r: 80355, b: 31820 });
+});
 
 test("rule 1: every generated slide holds only its template slide's shapes plus the map's New shapes", () => {
   const allowedNew = { cover: 1, "key-findings": 1, "executive-summary": 9 };
@@ -94,9 +133,9 @@ test("section order follows the template: main, ANEXĂ block, Concluzii last, wh
 
 test("M1–M4: cover, how-to-read, methodology and executive summary fill their named shapes", () => {
   const [cover, howTo, method, summary] = whole.slides;
-  assert.equal(text(getShape(cover, 15)), "Client sintetic cu etichete românești lungi – Centru de Dezvoltare");
+  assert.equal(text(getShape(cover, 15)), "Proiect sintetic GRF-R – Centru de Dezvoltare");
   assert.match(text(getShape(cover, 23)), /^2026 © www\.trendconsult\.eu/u);
-  assert.equal(text(getShape(cover, 12)), "Raport de grup");
+  assert.equal(text(getShape(cover, 12)), "Raport de grup · 01.10.2026");
   assert.match(cover, /GRF-R new:confidential[\s\S]*?CONFIDENȚIAL/u);
   assert(xfrmOf(cover.slice(cover.indexOf("GRF-R new:confidential") - 200)).y > xfrmOf(getShape(cover, 20)).y + xfrmOf(getShape(cover, 20)).cy);
   assert.equal(text(getShape(howTo, 93)), "CUM CITIM ACEST RAPORT");
@@ -236,7 +275,7 @@ test("no undefined/null/NaN or template example data in any generated slide", ()
 
 test("separate annex file: cover with „Anexă”, A1–A4, closing", async () => {
   const annex = await deck(payloadOf(acceptance, { annex: "separate" }), "appendix");
-  assert.equal(annex.plan[0].family, "cover"); assert.match(text(getShape(annex.slides[0], 12)), /Raport de grup – Anexă/u);
+  assert.equal(annex.plan[0].family, "cover"); assert.match(text(getShape(annex.slides[0], 12)), /Raport de grup · 01.10.2026 – Anexă/u);
   assert.equal(annex.plan.at(-1).family, "close");
   assert(annex.plan.slice(1, -1).every((item) => item.deliverable === "appendix"));
   const main = await deck(payloadOf(acceptance, { annex: "separate" }), "main");
@@ -531,6 +570,16 @@ test("behaviour lines carry no percentages: plain declined text or the imported 
 const { createFixture: insp7Fixture } = await import("./fixtures/grf-r-insp7-fixture.mjs");
 const insp7Payload = payloadOf(insp7Fixture(XLSX), { splitGroups: true });
 const insp7Deck = await deck(insp7Payload);
+test("E: key-findings ladder reaches the development-box bottom for 20 and 33 participants", () => {
+  for (const generated of [whole, insp7Deck]) {
+    const index = generated.plan.findIndex((item) => item.family === "key-findings" && !item.groupKey);
+    assert(index >= 0);
+    const ladder = getShape(generated.slides[index], 6); const development = getShape(generated.slides[index], 18);
+    const ladderBox = xfrmOf(ladder); const developmentBox = xfrmOf(development);
+    assert(Math.abs((ladderBox.y + ladderBox.cy) - (developmentBox.y + developmentBox.cy)) <= 0.05 * EMU + 1, "ladder bottom follows Arii de dezvoltare");
+    assert.equal(tableRows(ladder).length, generated.plan[index].ladder.length);
+  }
+});
 test("F47: overall means are sum/count; participants exactly at 2.75 and 3.50 count as in-band; executive summary equals t7", () => {
   const means = insp7Payload.records.map((record) => { const values = Object.values(record.scores).filter(Number.isFinite); return values.reduce((a, b) => a + b, 0) / values.length; });
   const edges = means.filter((mean) => Math.abs(mean - 2.75) < 1e-9 || Math.abs(mean - 3.5) < 1e-9);

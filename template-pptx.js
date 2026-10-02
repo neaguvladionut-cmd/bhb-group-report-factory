@@ -62,6 +62,9 @@ function columnLabelSize(rows) {
 // ---------------------------------------------------------------- chart text fit (F21/F22)
 const PT = EMU / 72;
 const FOOTER_TOP = 10.45 * EMU; // the TREND footer mark starts below this line on every content slide
+// The cleaned Trend asset is a fixed 20 × 11.25 in slide. Media is normalised at
+// fill time so the source asset can remain faithful to the supplied template.
+const SLIDE_SIZE = { cx: 20 * EMU, cy: 11.25 * EMU };
 function wrappedLines(value, size, width) {
   const charWidth = size * 0.5; let lines = 1; let line = 0;
   for (const word of String(value).split(/\s+/u).filter(Boolean)) { const w = word.length * charWidth; const gap = line ? charWidth : 0; if (line && line + gap + w > width) { lines += 1; line = w; } else line += gap + w; while (line > width) { lines += 1; line -= width; } }
@@ -257,8 +260,8 @@ const newId = () => nextNewId++;
 
 function fillCover(xml, item) {
   xml = fill(xml, 15, [item.title]);
+  xml = updateShape(xml, 12, (shape) => setRunText(shape, 0, `Raport de grup · ${item.reportDate || ""}${item.annexMark ? " – Anexă" : ""}`));
   xml = updateShape(xml, 23, (shape) => setRunText(shape, 0, item.year));
-  if (item.annexMark) xml = updateShape(xml, 12, (shape) => appendToLastRun(shape, " – Anexă"));
   const logo = xfrmOf(getShape(xml, 20));
   const style = setRPrColor(templateParagraphs(getShape(xml, 12))[0].rPrs[0], NAVY);
   return addToTree(xml, fitTitleOneLine(newTextShape({ id: newId(), name: "confidential", x: logo.x, y: logo.y + logo.cy + 0.15 * EMU, cx: logo.cx, cy: 0.6 * EMU, rPr: style, text: "CONFIDENȚIAL", align: "ctr" }), { minScale: 0.5 }).xml);
@@ -307,10 +310,10 @@ function bandSpans(frameXml, frameBox, rows, bands) {
  * Ladder table (t7, t12): one row per participant — name in the first column, score in the second (Vlad 2026-10-02).
  * Names share one size across the table: the largest (≤ the cell size, ≥ 9 pt) at which every name wraps into its row.
  */
-function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
+function fillScoreTable(xml, tableId, entries, bandsOf, low, high, targetBottom = null) {
   const frame = getShape(xml, tableId); const box = xfrmOf(frame);
   const templateRows = tableRows(frame);
-  const total = templateRows.reduce((sum, row) => sum + rowHeight(row), 0);
+  const total = targetBottom === null ? templateRows.reduce((sum, row) => sum + rowHeight(row), 0) : Math.max(1, targetBottom - box.y);
   const grey = templateRows.find(isShadedRow) || templateRows[0]; const white = templateRows.find((row) => !isShadedRow(row)) || templateRows[0];
   const baseSize = Number(white.match(/\ssz="(\d+)"/u)?.[1] || 1600);
   const layout = rowLayout(total, entries.length, baseSize);
@@ -332,7 +335,8 @@ function fillKeyFindings(xml, item) {
   const shift = title.lines > 1 ? title.lineHeight : 0;
   if (shift) xml = compressBelow(xml, [6, 19, 17, 20, 18], shift);
   const titleBox = xfrmOf(getShape(xml, 21)); const accent = setRPrColor(templateParagraphs(getShape(xml, 21))[0].rPrs.at(-1), TITLE_ACCENT);
-  const table = fillScoreTable(xml, 6, item.ladder, bandOf(low, high), low, high); xml = table.xml;
+  const developmentBox = xfrmOf(getShape(xml, 18));
+  const table = fillScoreTable(xml, 6, item.ladder, bandOf(low, high), low, high, developmentBox.y + developmentBox.cy); xml = table.xml;
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
   xml = placeBrace(xml, 12, 13, table.spans.below, item.counts.below);
@@ -445,10 +449,49 @@ function equaliseSiblings(xml, ids) {
   for (const id of ids) xml = updateShape(xml, id, (shape) => { const size = largestSize(shape); return size > target ? scaleRunSizes(shape, target / size) : shape; });
   return xml;
 }
+
+function srcRectOf(shapeXml) {
+  const match = shapeXml.match(/<a:srcRect\b([^>]*)\/?>(?:<\/a:srcRect>)?/u);
+  const attrs = match?.[1] || "";
+  const value = (name) => Number(attrs.match(new RegExp(`\\b${name}=\"(-?\\d+)\"`, "u"))?.[1] || 0);
+  return { l: value("l"), t: value("t"), r: value("r"), b: value("b") };
+}
+function setSrcRect(shapeXml, crop) {
+  const value = `<a:srcRect l="${Math.round(crop.l)}" t="${Math.round(crop.t)}" r="${Math.round(crop.r)}" b="${Math.round(crop.b)}"/>`;
+  if (/<a:srcRect\b/u.test(shapeXml)) return shapeXml.replace(/<a:srcRect\b[^>]*\/?>(?:<\/a:srcRect>)?/u, value);
+  return shapeXml.replace(/(<a:blip\b[\s\S]*?<\/a:blip>)/u, `$1${value}`);
+}
+/** Intersect a media frame with the slide; pictures also preserve their visible source pixels. */
+function clampMediaShape(shapeXml) {
+  const frame = xfrmOf(shapeXml);
+  if (!frame) return shapeXml;
+  const left = Math.max(0, frame.x); const top = Math.max(0, frame.y);
+  const right = Math.min(SLIDE_SIZE.cx, frame.x + frame.cx); const bottom = Math.min(SLIDE_SIZE.cy, frame.y + frame.cy);
+  if (left === frame.x && top === frame.y && right === frame.x + frame.cx && bottom === frame.y + frame.cy) return shapeXml;
+  if (right <= left || bottom <= top) throw new Error(`Media frame lies entirely outside the slide: ${JSON.stringify(frame)}`);
+  const bounded = { x: left, y: top, cx: right - left, cy: bottom - top };
+  if (!/<p:pic\b/u.test(shapeXml)) return setXfrm(shapeXml, bounded);
+  const crop = srcRectOf(shapeXml);
+  const sourceWidth = 100000 - crop.l - crop.r; const sourceHeight = 100000 - crop.t - crop.b;
+  const nextCrop = {
+    l: crop.l + (left - frame.x) / frame.cx * sourceWidth,
+    t: crop.t + (top - frame.y) / frame.cy * sourceHeight,
+    r: crop.r + (frame.x + frame.cx - right) / frame.cx * sourceWidth,
+    b: crop.b + (frame.y + frame.cy - bottom) / frame.cy * sourceHeight
+  };
+  return setSrcRect(setXfrm(shapeXml, bounded), nextCrop);
+}
 export function renderSlide(item, sourceXml) {
   let xml = fillSlide(sourceXml, item);
   for (const group of SIBLINGS[item.family] || []) if (group.every((id) => hasShape(xml, id))) xml = equaliseSiblings(xml, group);
   xml = applyBand(xml, chartSpec(item), item);
+  // GRF-PX: media starts from the template's outer frame. Dynamic plot layouts and benchmark rectangles
+  // are calculated later inside that frame; only the slide-edge overhang is normalised here.
+  for (const match of sourceXml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)) {
+    if (match[1] === "graphicFrame" && !/<c:chart\b/u.test(match[0])) continue;
+    const id = Number(match[2]); const template = getShape(sourceXml, id);
+    xml = updateShape(xml, id, () => clampMediaShape(template));
+  }
   return xml;
 }
 

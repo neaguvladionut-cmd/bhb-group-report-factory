@@ -3,6 +3,10 @@
 // fill layer writes into that slide's named shapes; nothing here is rendered free-form.
 
 const text = (value) => String(value ?? "").trim();
+const displayDate = (value) => {
+  const raw = text(value); const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/u); if (iso) return `${iso[3].padStart(2, "0")}.${iso[2].padStart(2, "0")}.${iso[1]}`;
+  const dmy = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/u); return dmy ? `${dmy[1].padStart(2, "0")}.${dmy[2].padStart(2, "0")}.${dmy[3]}` : raw;
+};
 export const f2 = (value) => value !== null && value !== "" && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "";
 export const pct = (count, total) => total ? Math.round(count / total * 100) : 0;
 const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
@@ -130,25 +134,39 @@ export const METHODOLOGY_PRINCIPLES = [
 ];
 export function methodologyColumns(payload) {
   const metadata = payload.metadata || {};
-  const schemas = payload.schemas || [];
-  const evaluators = new Set(schemas.flatMap((schema) => schema.methodology?.evaluators || []));
-  const dates = new Set(schemas.flatMap((schema) => schema.methodology?.dates || []));
-  const teamSizes = schemas.flatMap((schema) => schema.methodology?.teamSizes || []);
-  const consultants = text(metadata.evaluators) || String(evaluators.size || teamSizes.filter((value) => value >= 2).sort((a, b) => b - a)[0] || "");
-  const days = text(metadata.days) || String(dates.size || "");
+  const source = payload.methodology || (payload.schemas || []).find((schema) => schema.kind === "ac-detailed-0-2" || !schema.kind)?.methodology || {};
+  const override = text(metadata.evaluators);
+  const overrideNames = override && !/^\d+$/u.test(override) ? override.split(/[,;/]/u).map(text).filter(Boolean) : [];
+  const sourceEvaluatorNames = source.evaluatorNames || source.evaluators || [];
+  const evaluatorNames = overrideNames.length ? overrideNames : sourceEvaluatorNames;
+  const consultants = /^\d+$/u.test(override) ? override : String(evaluatorNames.length || "");
+  const dates = source.dates || [];
+  const days = text(metadata.days) || String(dates.length || "");
+  const teamCounts = new Map(); for (const size of source.teamSizes || []) teamCounts.set(size, (teamCounts.get(size) || 0) + 1);
+  const sourceTeamSize = source.commonTeamSize || [...teamCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || "";
+  const teamSize = text(metadata.teamSize) || String(sourceTeamSize);
+  const period = text(metadata.evaluationPeriod) || (source.period ? `${source.period.first}${source.period.first === source.period.last ? "" : ` – ${source.period.last}`}` : "");
+  const roleOverride = text(metadata.populationByRole);
+  const roles = Array.isArray(metadata.populationByRole) ? metadata.populationByRole : source.populationByRole || [];
+  const roleText = roleOverride || (roles.length ? roles.slice().sort((a, b) => b.count - a.count || a.role.localeCompare(b.role, "ro")).map((item) => `${item.count} ${item.role}`).join(", ") : "");
+  const client = text(metadata.clientName || metadata.projectName);
+  const composedPopulation = /^\d+\s+participanți(?:\s*\(.*\))?$/iu.test(roleOverride) ? roleOverride : "";
+  const population = composedPopulation || (roleText ? String(payload.participantCounts?.included ?? 0) + " participanți (" + roleText + ")" : String(payload.participantCounts?.included ?? 0) + " participanți" + (client ? " " + client : ""));
+  const location = text(metadata.location) || (source.locations || []).join(", ");
   const exerciseList = text(metadata.exercises);
   const exerciseCount = text(metadata.exerciseCount) || (exerciseList ? String(exerciseList.split(/[;,]\s*|\n/u).filter((item) => text(item)).length) : "");
-  const client = text(metadata.clientName || metadata.projectName);
   const facts = [
-    { number: String(payload.participantCounts?.included ?? ""), text: `participanți${client ? ` ${client}` : ""}` },
-    { number: consultants, text: "consultanți TREND implicați" },
-    { number: days, text: days === "1" ? "zi de evaluare" : "zile de evaluare" },
-    { number: String((payload.behaviorAggregates || []).length), text: "comportamente specifice observate" },
-    { number: exerciseCount, text: `exerciții concepute pentru a evidenția nivelul competențelor evaluate${exerciseList ? `: ${exerciseList}` : ""}` }
+    { number: "", text: population, keep: true },
+    { number: consultants, text: "consultanți TREND implicați", keep: Boolean(consultants) },
+    { number: days, text: `${days === "1" ? "zi" : "zile"} de evaluare${period ? ` · ${period}` : ""}`, keep: Boolean(days) },
+    { number: "", text: teamSize ? `Fiecare participant a fost observat de o echipă formată din ${teamSize} consultanți` : "", keep: Boolean(teamSize) },
+    { number: "", text: location ? `Evaluarea a fost organizată la ${location}` : "", keep: Boolean(location) },
+    { number: String((payload.behaviorAggregates || []).length), text: "comportamente specifice observate", keep: true },
+    { number: exerciseCount, text: `exerciții concepute pentru a evidenția nivelul competențelor evaluate${exerciseList ? `: ${exerciseList}` : ""}`, keep: Boolean(exerciseCount) }
   ];
   // A fact the consultant left empty is omitted, never printed as a number-less sentence (ruling 2026-10-01).
-  const missing = { evaluators: !consultants, days: !days, exercises: !exerciseCount };
-  for (let index = facts.length - 1; index >= 1; index -= 1) if (!facts[index].number) facts.splice(index, 1);
+  const missing = { evaluators: !consultants, days: !days, teamSize: !teamSize, period: !period, location: !location, population: !roleText, exercises: !exerciseCount };
+  for (let index = facts.length - 1; index >= 1; index -= 1) if (!facts[index].keep) facts.splice(index, 1);
   if (text(metadata.otherInstruments)) facts.push({ number: "", text: `Alte instrumente folosite: ${text(metadata.otherInstruments)}` });
   const principles = text(metadata.methodologyText) ? text(metadata.methodologyText).split(/\n+/u).map(text).filter(Boolean) : METHODOLOGY_PRINCIPLES;
   const line = (fact) => `${fact.number ? `${fact.number} ` : ""}${fact.text}`;
@@ -334,13 +352,15 @@ export function reportPlan(payload, { scope = "whole" } = {}) {
   const metadata = payload.metadata || {};
   const annex = metadata.annex || "end";
   const client = text(metadata.clientName || metadata.projectName);
+  const project = text(metadata.projectName) || "Proiect Trend";
   const program = text(metadata.program) || "Centru de Dezvoltare";
-  const year = text(metadata.reportDate).match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
+  const reportDate = displayDate(metadata.reportDate) || new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
+  const year = reportDate.match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
   const groups = metadata.splitGroups && (payload.groups || []).length >= 2 ? payload.groups.map((group) => [viewForGroup(payload, group), group.code]) : [];
   const eachScope = (builder, target) => { builder(target, payload); groups.forEach(([view, code]) => builder(target, view, code)); };
   const single = (family, data = {}, deliverable = "main") => ({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable, ...data });
   // MAIN: cover, how to read, methodology, executive summary, „Distribuția rezultatelor” (whole, then groups).
-  const main = [single("cover", { title: `${client} – ${program}`, client, program, year }), single("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: [] }), single("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) }), single("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) })];
+  const main = [single("cover", { title: `${project} – ${program}`, client, project, program, reportDate, year }), single("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: [] }), single("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) }), single("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) })];
   eachScope(addResultsSection, main);
   // ANEXĂ: opener, per-person charts, „Analiza observațiilor” (key findings, then charts by participant), behaviours.
   const annexBlock = [];
