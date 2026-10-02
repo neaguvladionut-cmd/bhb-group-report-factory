@@ -151,7 +151,7 @@ function parseDetailed(schema, corrections = {}) {
       const original = row[column.index];
       const score = correction?.mode === "value" ? numberValue(correction.value) : numberValue(original);
       const details = { correctionKey, sourceName: schema.sourceName, field: column.behavior, competency: column.competency, behavior: column.behavior, identity, originalValue: original, kind: "detailed-score", subject: column.behavior };
-      if (score === null) { issue(issues, "warning", "detailed-blank", `Comportament neobservat: ${column.behavior}`, rowNumber, details); continue; }
+      if (score === null) { issue(issues, "warning", "detailed-blank", `Scor lipsă: ${name || "participant fără nume"} – „${column.behavior}”`, rowNumber, details); continue; }
       if (!Number.isInteger(score) || score < 0 || score > 2) { issue(issues, "blocker", "detailed-score", `Scor invalid: sunt acceptate numai valorile întregi 0, 1 sau 2 pentru ${column.behavior}.`, rowNumber, details); continue; }
       if (!scores[column.competency]) scores[column.competency] = [];
       scores[column.competency].push(score);

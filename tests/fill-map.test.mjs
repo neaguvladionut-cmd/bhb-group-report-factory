@@ -49,7 +49,8 @@ test("rule 1: every generated slide holds only its template slide's shapes plus 
       const extra = shapes.filter((shape) => !templateIds.has(shape.id));
       assert(extra.every((shape) => shape.name.startsWith(NEW_SHAPE_PREFIX)), `slide ${index + 1} (${item.family}) has an undeclared shape: ${extra.map((shape) => shape.name).join(", ")}`);
       assert.equal(extra.length, allowedNew[item.family] || 0, `slide ${index + 1} (${item.family}) New-shape count`);
-      for (const id of templateIds) assert(shapes.some((shape) => shape.id === id), `slide ${index + 1} lost template shape ${id}`);
+      const removed = item.noRanking ? new Set(["17", "18", "19", "20"]) : new Set(); // F41: R5 boxes removed when nothing is ranked
+      for (const id of templateIds) if (!removed.has(id)) assert(shapes.some((shape) => shape.id === id), `slide ${index + 1} lost template shape ${id}`);
     });
   }
 });
@@ -432,4 +433,58 @@ test("zero-width breaks stay in the deck's charts: bundle and audit carry clean 
   const { createAuditWorkbook } = await import("../src/rebuild-core.js");
   const audit = createAuditWorkbook(XLSX, payload);
   for (const name of audit.SheetNames) for (const row of XLSX.utils.sheet_to_json(audit.Sheets[name], { header: 1, defval: "" })) for (const cell of row) assert.doesNotMatch(String(cell), invisible);
+});
+
+const { createFixture: insp6Fixture } = await import("./fixtures/grf-r-insp6-fixture.mjs");
+const insp6 = insp6Fixture(XLSX);
+const insp6Payload = payloadOf(insp6, { splitGroups: true });
+const insp6Deck = await deck(insp6Payload);
+
+test("F41: a competency with one scored behaviour keeps table/braces/mean·median, loses its R5 boxes, has no behaviour slide, and the bundle has no empty rows", async () => {
+  const { unrankedCompetencies } = await import("../src/rebuild-report-plan.js");
+  const unranked = unrankedCompetencies(insp6Payload);
+  assert.equal(unranked.length, 1);
+  const index = insp6Deck.plan.findIndex((item) => item.family === "key-findings" && item.competency === unranked[0]);
+  const xml = insp6Deck.slides[index];
+  for (const id of [17, 18, 19, 20]) assert(!hasShapeId(xml, id), `id ${id} removed`);
+  for (const id of [6, 8, 14, 12]) assert(hasShapeId(xml, id));
+  assert.match(xml, /GRF-R new:subtitle[\s\S]*?medie \d\.\d\d · mediană/u);
+  assert(!insp6Deck.plan.some((item) => item.family === "behavior" && item.competency === unranked[0]));
+  const artifacts = await buildBundleArtifacts(XLSX, insp6Payload);
+  const entry = artifacts.manifest.items.findIndex((item) => item.family === "key-findings" && item.heading.startsWith(unranked[0]));
+  assert(!artifacts.layouts[entry].texts.some((text) => /Abilități cheie|Arii de dezvoltare/u.test(text.line)));
+});
+const hasShapeId = (xml, id) => new RegExp(`<p:cNvPr\\b[^>]*\\bid="${id}"`, "u").test(xml);
+
+test("F42: tied strongest/weakest competencies are all named; F44: a missing score names the participant", () => {
+  const summary = insp6Deck.plan.find((item) => item.family === "executive-summary").summary;
+  const means = insp6Payload.calculations.filter((item) => item.mean !== null).map((item) => f2(item.mean));
+  const lowest = means.slice().sort()[0];
+  if (means.filter((mean) => mean === lowest).length > 1) assert.match(summary.competencyLines[1], / și .* \(\d\.\d\d\)$/u);
+  assert.match(summary.competencyLines[1], new RegExp(`\\(${lowest.replace(".", "\\.")}\\)$`, "u"));
+  const blank = insp6Payload.warnings.find((item) => item.code === "detailed-blank");
+  assert(blank && /^Scor lipsă: Participant Sintetic B\d\d – „/u.test(blank.message), blank?.message);
+});
+
+test("F43: bundle file names keep group and page parts and stay unique", async () => {
+  const artifacts = await buildBundleArtifacts(XLSX, insp6Payload);
+  const names = artifacts.manifest.items.map((item) => item.file);
+  assert.equal(new Set(names.map((name) => name.slice(4))).size, names.length, "unique even without the number");
+  for (const item of artifacts.manifest.items) {
+    if (item.group !== "whole-project") assert(item.file.endsWith(`-${item.groupLabel.toLowerCase()}`) || new RegExp(`-${item.groupLabel.toLowerCase()}-p\\d+$`, "u").test(item.file), item.file);
+  }
+  const paged = insp6Deck.plan.filter((item) => item.pages > 1 && BUNDLE_FAMILIES.has(item.family));
+  for (const item of paged) assert(names.some((name) => name.endsWith(`-p${item.page}`)));
+});
+
+test("F45: a zone bar too short for its name carries the name outside its end", async () => {
+  for (const [index, item] of insp6Deck.plan.entries()) {
+    if (item.family !== "zone") continue;
+    const [{ chart }] = await insp6Deck.chartsOf(index);
+    item.values.forEach((values, seriesIndex) => values.forEach((value, point) => {
+      if (value === null || value > 1.2) return;
+      const series = chart.match(/<c:ser>[\s\S]*?<\/c:ser>/gu)[seriesIndex];
+      assert.match(series, new RegExp(`<c:dLbl><c:idx val="${point}"/>[\\s\\S]*?<c:dLblPos val="outEnd"/>`, "u"), `${item.regions[seriesIndex]} at ${value}`);
+    }));
+  }
 });

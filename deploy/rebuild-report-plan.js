@@ -159,6 +159,14 @@ export const methodologyPages = (payload) => [{ page: methodologyColumns(payload
 const scoredCalculations = (view) => view.calculations.filter((item) => item.mean !== null);
 const byMeanDesc = (items) => items.slice().sort((a, b) => b.mean - a.mean);
 
+const joinRo = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} și ${names.at(-1)}`);
+const tied = (sorted, mean) => joinRo(sorted.filter((item) => f2(item.mean) === f2(mean)).map((item) => item.competency));
+/** Competencies with fewer than two scored behaviours: no R5 ranking (F41). */
+export function unrankedCompetencies(payload) {
+  const counts = new Map((payload.competencies || []).map((competency) => [competency, 0]));
+  for (const row of payload.behaviorAggregates || []) counts.set(row.competency, (counts.get(row.competency) || 0) + 1);
+  return [...counts.entries()].filter(([, count]) => count < 2).map(([competency]) => competency);
+}
 export function executiveSummary(payload) {
   const bands = payload.bands || { below: 0, typical: 0, above: 0, n: 0, low: 2.75, high: 3.5 };
   const sorted = byMeanDesc(scoredCalculations(payload));
@@ -169,7 +177,8 @@ export function executiveSummary(payload) {
     distribution: [{ label: `Sub ${f2(bands.low)}`, value: shares.below }, { label: `În intervalul ${range(bands.low, bands.high)}`, value: shares.in }, { label: `Peste ${f2(bands.high)}`, value: shares.above }],
     sentence: `Evaluarea celor ${n} participanți: ${shares.in}% dintre participanți se încadrează în intervalul benchmarkului (${range(bands.low, bands.high)}), ${shares.above}% îl depășesc, iar ${shares.below}% se situează sub nivelul său inferior.`,
     strongest: sorted[0] || null, weakest: sorted.at(-1) || null,
-    competencyLines: sorted.length ? [`Cel mai bine reprezentată: ${sorted[0].competency} (${f2(sorted[0].mean)})`, `Principala oportunitate: ${sorted.at(-1).competency} (${f2(sorted.at(-1).mean)})`] : [],
+    // F42: a tie names every tied competency („X și Y (3.20)”).
+    competencyLines: sorted.length ? [`Cel mai bine reprezentată: ${tied(sorted, sorted[0].mean)} (${f2(sorted[0].mean)})`, `Principala oportunitate: ${tied(sorted, sorted.at(-1).mean)} (${f2(sorted.at(-1).mean)})`] : [],
     conclusions: text(payload.metadata?.executiveConclusions ?? payload.metadata?.conclusions)
   };
 }
@@ -184,6 +193,8 @@ export function competencyFindings(payload) {
     const counts = { above: 0, in: 0, below: 0 }; scores.forEach((score) => { counts[band(score, low, high)] += 1; });
     return {
       item, insight, competency: item.competency, mean: item.mean, median: medianOf(scores), scores, counts,
+      // F41: fewer than two scored behaviours leave R5 nothing to rank; the slide drops its two R5 boxes.
+      noRanking: !insight.key.length && !insight.development.length,
       strengths: insight.key.map((row) => behaviourLine(row, "score2", row.pct2)),
       development: insight.development.map((row) => behaviourLine(row, "score0", row.pct0))
     };

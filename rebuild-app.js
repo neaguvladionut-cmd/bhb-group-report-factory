@@ -68,6 +68,11 @@ function renderStructure() {
   const main = plan.filter((slide) => slide.deliverable !== "appendix");
   const appendix = plan.filter((slide) => slide.deliverable === "appendix");
   root.innerHTML = `<div class="structure-card"><strong>Trend · raport principal</strong><span>${main.length} slide-uri</span><small>Întregul proiect primul; grupurile CODE urmează doar când activezi împărțirea.</small></div><div class="structure-card"><strong>Anexă</strong><span>${appendix.length ? `${appendix.length} slide-uri` : "dezactivată"}</span><small>${payload.metadata.annex === "separate" ? "Se descarcă separat." : payload.metadata.annex === "none" ? "Nu se generează." : "Se include la final."}</small></div>`;
+  for (const competency of unrankedCompetencies(payload)) {
+    const note = document.createElement("p"); note.className = "structure-card methodology-warning"; note.setAttribute("role", "status");
+    note.textContent = `Competența ${competency} are un singur comportament evaluat: fără clasament (fără „Comportamente cheie” și fără casetele de abilități pe slide-ul de constatări).`;
+    root.append(note);
+  }
   const missingMethodology = methodologyColumns(payload).missingLabels || [];
   if (missingMethodology.length) {
     const warning = document.createElement("p");

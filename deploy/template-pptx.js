@@ -175,6 +175,9 @@ function chartLayout(item, chartXml, slideXml, spec) {
     const plotBottom = frame.y + (layout.y + layout.h) * frame.cy; const room = (FOOTER_TOP - plotBottom) / PT - 8;
     const slot = layout.w * frame.cx / PT / Math.max(1, spec.data.categories.length) * 0.92;
     options.labelSize = fitLabels(spec.data.categories, { max: axisLabelSize(chartXml, "catAx"), width: slot, height: room, maxLines: 4 });
+    // F45: a bar too short for its rotated region name gets the name outside its end (above the bar), never over the axis.
+    const perUnit = layout.h * frame.cy / PT / 4; const nameSize = axisLabelSize(chartXml, "dLbls") / 100;
+    options.outsideLabels = spec.data.series.map((series) => series.values.map((value, index) => ({ value, index })).filter(({ value }) => value !== null && (Number(value) - 1) * perUnit < String(series.name).length * nameSize * 0.6 + 12).map(({ index }) => index));
   }
   return { options, slide };
 }
@@ -314,9 +317,12 @@ function fillKeyFindings(xml, item) {
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
   xml = placeBrace(xml, 12, 13, table.spans.below, item.counts.below);
-  xml = fill(xml, 17, item.strengths.length ? item.strengths : [""]);
-  xml = fill(xml, 18, item.development.length ? item.development : [""]);
   const strengthsHeader = xfrmOf(getShape(xml, 19));
+  if (item.noRanking) { for (const id of [17, 18, 19, 20]) xml = updateShape(xml, id, () => ""); }
+  else {
+    xml = fill(xml, 17, item.strengths.length ? item.strengths : [""]);
+    xml = fill(xml, 18, item.development.length ? item.development : [""]);
+  }
   return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU + shift, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
 }
 /**
@@ -421,7 +427,7 @@ function equaliseSiblings(xml, ids) {
 }
 export function renderSlide(item, sourceXml) {
   let xml = fillSlide(sourceXml, item);
-  for (const group of SIBLINGS[item.family] || []) xml = equaliseSiblings(xml, group);
+  for (const group of SIBLINGS[item.family] || []) if (group.every((id) => hasShape(xml, id))) xml = equaliseSiblings(xml, group);
   xml = applyBand(xml, chartSpec(item), item);
   return xml;
 }
@@ -600,8 +606,10 @@ export function bundleItems(payload) {
   return reportPlan(payload, { scope: "whole" }).filter((item) => BUNDLE_FAMILIES.has(item.family)).map((item, index) => {
     const id = String(index + 1).padStart(3, "0");
     const heading = item.family === "key-findings" || item.family === "behavior" ? `${item.competency}${item.suffix || ""}` : item.title;
-    const scope = [item.competency, item.groupLabel || (item.competency ? "" : "intreg-proiect"), item.pages > 1 ? `p${item.page}` : ""].filter(Boolean).join("-");
-    return { id, item, heading, fileStem: `${id}-${ITEM_SLUGS[item.family]}-${asciiSlug(scope)}`, ...bundleContent(item) };
+    // F43: the competency slug is shortened, never the group or page part.
+    const competency = asciiSlug(item.competency).slice(0, 32).replace(/-+$/u, "");
+    const scope = [competency, asciiSlug(item.groupLabel) || (competency ? "" : "intreg-proiect"), item.pages > 1 ? `p${item.page}` : ""].filter(Boolean).join("-");
+    return { id, item, heading, fileStem: `${id}-${ITEM_SLUGS[item.family]}-${scope}`, ...bundleContent(item) };
   });
 }
 const chartValueText = (value) => { const rounded = roundChartValue(value); return rounded === null ? "" : String(rounded); };
@@ -614,7 +622,7 @@ function bundleContent(item) {
     const categories = spec.data.categories.map((category) => String(category).replace(/[\u200B-\u200D\u2060\uFEFF]/gu, ""));
     return { kind: "chart", categories, series, scale: percent ? [0, 1] : [1, 5], percent, sourceValues: [...categories, ...series.map((entry) => entry.name), ...series.flatMap((entry) => entry.values.map(chartValueText).filter(Boolean))] };
   }
-  if (item.family === "key-findings") { const rows = [["Scoruri", item.scores.map(f2).join("  ")], ["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.scores.map(f2), ...item.strengths, ...item.development] }; }
+  if (item.family === "key-findings") { const rows = [["Scoruri", item.scores.map(f2).join("  ")], ...(item.noRanking ? [] : [["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]])]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.scores.map(f2), ...item.strengths, ...item.development] }; }
   if (item.family === "benchmark") { const table = item.table; const rows = table.competencyMeans.map((row) => [row.competency, f2(row.mean)]); rows.push([`Peste ${f2(table.high)}`, `${table.shares.above}%`], [`Între ${f2(table.low)} – ${f2(table.high)}`, `${table.shares.in}%`], [`Sub ${f2(table.low)}`, `${table.shares.below}%`], ["Medii individuale", table.rows.map((row) => f2(row.value)).join("  ")]); return { kind: "table", rows, sourceValues: [...table.competencyMeans.flatMap((row) => [row.competency, f2(row.mean)]), `${table.shares.above}%`, `${table.shares.in}%`, `${table.shares.below}%`, ...table.rows.map((row) => f2(row.value))] }; }
   if (item.family === "behavior") { const count = Math.max(item.key.length, item.development.length); const rows = [["Abilități cheie", "Abilități de dezvoltat"], ...Array.from({ length: count }, (_, index) => [item.key[index] || "", item.development[index] || ""])]; return { kind: "table", header: true, rows, sourceValues: [...item.key, ...item.development] }; }
   return { kind: "table", rows: [], sourceValues: [] };

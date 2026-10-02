@@ -154,7 +154,7 @@ function parseDetailed(schema, corrections = {}) {
       const original = row[column.index];
       const score = correction?.mode === "value" ? numberValue(correction.value) : numberValue(original);
       const details = { correctionKey, sourceName: schema.sourceName, field: column.behavior, competency: column.competency, behavior: column.behavior, identity, originalValue: original, kind: "detailed-score", subject: column.behavior };
-      if (score === null) { issue(issues, "warning", "detailed-blank", `Comportament neobservat: ${column.behavior}`, rowNumber, details); continue; }
+      if (score === null) { issue(issues, "warning", "detailed-blank", `Scor lipsă: ${name || "participant fără nume"} – „${column.behavior}”`, rowNumber, details); continue; }
       if (!Number.isInteger(score) || score < 0 || score > 2) { issue(issues, "blocker", "detailed-score", `Scor invalid: sunt acceptate numai valorile întregi 0, 1 sau 2 pentru ${column.behavior}.`, rowNumber, details); continue; }
       if (!scores[column.competency]) scores[column.competency] = [];
       scores[column.competency].push(score);
@@ -483,6 +483,14 @@ const methodologyPages = (payload) => [{ page: methodologyColumns(payload) }];
 const scoredCalculations = (view) => view.calculations.filter((item) => item.mean !== null);
 const byMeanDesc = (items) => items.slice().sort((a, b) => b.mean - a.mean);
 
+const joinRo = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} și ${names.at(-1)}`);
+const tied = (sorted, mean) => joinRo(sorted.filter((item) => f2(item.mean) === f2(mean)).map((item) => item.competency));
+/** Competencies with fewer than two scored behaviours: no R5 ranking (F41). */
+function unrankedCompetencies(payload) {
+  const counts = new Map((payload.competencies || []).map((competency) => [competency, 0]));
+  for (const row of payload.behaviorAggregates || []) counts.set(row.competency, (counts.get(row.competency) || 0) + 1);
+  return [...counts.entries()].filter(([, count]) => count < 2).map(([competency]) => competency);
+}
 function executiveSummary(payload) {
   const bands = payload.bands || { below: 0, typical: 0, above: 0, n: 0, low: 2.75, high: 3.5 };
   const sorted = byMeanDesc(scoredCalculations(payload));
@@ -493,7 +501,8 @@ function executiveSummary(payload) {
     distribution: [{ label: `Sub ${f2(bands.low)}`, value: shares.below }, { label: `În intervalul ${range(bands.low, bands.high)}`, value: shares.in }, { label: `Peste ${f2(bands.high)}`, value: shares.above }],
     sentence: `Evaluarea celor ${n} participanți: ${shares.in}% dintre participanți se încadrează în intervalul benchmarkului (${range(bands.low, bands.high)}), ${shares.above}% îl depășesc, iar ${shares.below}% se situează sub nivelul său inferior.`,
     strongest: sorted[0] || null, weakest: sorted.at(-1) || null,
-    competencyLines: sorted.length ? [`Cel mai bine reprezentată: ${sorted[0].competency} (${f2(sorted[0].mean)})`, `Principala oportunitate: ${sorted.at(-1).competency} (${f2(sorted.at(-1).mean)})`] : [],
+    // F42: a tie names every tied competency („X și Y (3.20)”).
+    competencyLines: sorted.length ? [`Cel mai bine reprezentată: ${tied(sorted, sorted[0].mean)} (${f2(sorted[0].mean)})`, `Principala oportunitate: ${tied(sorted, sorted.at(-1).mean)} (${f2(sorted.at(-1).mean)})`] : [],
     conclusions: text(payload.metadata?.executiveConclusions ?? payload.metadata?.conclusions)
   };
 }
@@ -508,6 +517,8 @@ function competencyFindings(payload) {
     const counts = { above: 0, in: 0, below: 0 }; scores.forEach((score) => { counts[band(score, low, high)] += 1; });
     return {
       item, insight, competency: item.competency, mean: item.mean, median: medianOf(scores), scores, counts,
+      // F41: fewer than two scored behaviours leave R5 nothing to rank; the slide drops its two R5 boxes.
+      noRanking: !insight.key.length && !insight.development.length,
       strengths: insight.key.map((row) => behaviourLine(row, "score2", row.pct2)),
       development: insight.development.map((row) => behaviourLine(row, "score0", row.pct0))
     };
@@ -647,7 +658,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
 
-Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
+Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
 
 (()=>{
 // BP-GRF-R fill layer: writes plan data into the named shapes of a cloned Trend template slide
@@ -973,7 +984,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, fixedAxis = false, plotLayout = null } = {}) {
+function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, outsideLabels = null, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -997,6 +1008,13 @@ function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], category
         const points = data.categories.map((_, pointIndex) => sample.replace(/<c:idx val="\d+"\/>/u, `<c:idx val="${pointIndex}"/>`).replace(/<a:srgbClr val="[0-9A-F]{6}"/iu, `<a:srgbClr val="${categoryColors[pointIndex % categoryColors.length]}"`)).join("");
         body = body.replace(/<c:dPt>[\s\S]*?<\/c:dPt>/gu, "").replace(/(<\/c:spPr>)(\s*<c:invertIfNegative\b[^>]*\/>)?/u, `$1$2${points}`);
       }
+    }
+    if (outsideLabels?.[index]?.length && /<c:dLbls>/u.test(body)) {
+      const labels = body.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/u)[0];
+      const spPr = labels.match(/<c:spPr>[\s\S]*?<\/c:spPr>/u)?.[0] || "";
+      const txPr = (labels.match(/<c:txPr>[\s\S]*?<\/c:txPr>/u)?.[0] || "").replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/u, '<a:solidFill><a:srgbClr val="003057"/></a:solidFill>');
+      const points = outsideLabels[index].map((point) => `<c:dLbl><c:idx val="${point}"/>${spPr}${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
+      body = body.replace(/<c:dLbls>/u, `<c:dLbls>${points}`);
     }
     if (index >= templateSeries.length && seriesColors[index]) body = setSeriesFill(body, seriesColors[index]);
     if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
@@ -1219,6 +1237,9 @@ function chartLayout(item, chartXml, slideXml, spec) {
     const plotBottom = frame.y + (layout.y + layout.h) * frame.cy; const room = (FOOTER_TOP - plotBottom) / PT - 8;
     const slot = layout.w * frame.cx / PT / Math.max(1, spec.data.categories.length) * 0.92;
     options.labelSize = fitLabels(spec.data.categories, { max: axisLabelSize(chartXml, "catAx"), width: slot, height: room, maxLines: 4 });
+    // F45: a bar too short for its rotated region name gets the name outside its end (above the bar), never over the axis.
+    const perUnit = layout.h * frame.cy / PT / 4; const nameSize = axisLabelSize(chartXml, "dLbls") / 100;
+    options.outsideLabels = spec.data.series.map((series) => series.values.map((value, index) => ({ value, index })).filter(({ value }) => value !== null && (Number(value) - 1) * perUnit < String(series.name).length * nameSize * 0.6 + 12).map(({ index }) => index));
   }
   return { options, slide };
 }
@@ -1358,9 +1379,12 @@ function fillKeyFindings(xml, item) {
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
   xml = placeBrace(xml, 12, 13, table.spans.below, item.counts.below);
-  xml = fill(xml, 17, item.strengths.length ? item.strengths : [""]);
-  xml = fill(xml, 18, item.development.length ? item.development : [""]);
   const strengthsHeader = xfrmOf(getShape(xml, 19));
+  if (item.noRanking) { for (const id of [17, 18, 19, 20]) xml = updateShape(xml, id, () => ""); }
+  else {
+    xml = fill(xml, 17, item.strengths.length ? item.strengths : [""]);
+    xml = fill(xml, 18, item.development.length ? item.development : [""]);
+  }
   return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU + shift, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
 }
 /**
@@ -1465,7 +1489,7 @@ function equaliseSiblings(xml, ids) {
 }
 function renderSlide(item, sourceXml) {
   let xml = fillSlide(sourceXml, item);
-  for (const group of SIBLINGS[item.family] || []) xml = equaliseSiblings(xml, group);
+  for (const group of SIBLINGS[item.family] || []) if (group.every((id) => hasShape(xml, id))) xml = equaliseSiblings(xml, group);
   xml = applyBand(xml, chartSpec(item), item);
   return xml;
 }
@@ -1644,8 +1668,10 @@ function bundleItems(payload) {
   return reportPlan(payload, { scope: "whole" }).filter((item) => BUNDLE_FAMILIES.has(item.family)).map((item, index) => {
     const id = String(index + 1).padStart(3, "0");
     const heading = item.family === "key-findings" || item.family === "behavior" ? `${item.competency}${item.suffix || ""}` : item.title;
-    const scope = [item.competency, item.groupLabel || (item.competency ? "" : "intreg-proiect"), item.pages > 1 ? `p${item.page}` : ""].filter(Boolean).join("-");
-    return { id, item, heading, fileStem: `${id}-${ITEM_SLUGS[item.family]}-${asciiSlug(scope)}`, ...bundleContent(item) };
+    // F43: the competency slug is shortened, never the group or page part.
+    const competency = asciiSlug(item.competency).slice(0, 32).replace(/-+$/u, "");
+    const scope = [competency, asciiSlug(item.groupLabel) || (competency ? "" : "intreg-proiect"), item.pages > 1 ? `p${item.page}` : ""].filter(Boolean).join("-");
+    return { id, item, heading, fileStem: `${id}-${ITEM_SLUGS[item.family]}-${scope}`, ...bundleContent(item) };
   });
 }
 const chartValueText = (value) => { const rounded = roundChartValue(value); return rounded === null ? "" : String(rounded); };
@@ -1658,7 +1684,7 @@ function bundleContent(item) {
     const categories = spec.data.categories.map((category) => String(category).replace(/[\u200B-\u200D\u2060\uFEFF]/gu, ""));
     return { kind: "chart", categories, series, scale: percent ? [0, 1] : [1, 5], percent, sourceValues: [...categories, ...series.map((entry) => entry.name), ...series.flatMap((entry) => entry.values.map(chartValueText).filter(Boolean))] };
   }
-  if (item.family === "key-findings") { const rows = [["Scoruri", item.scores.map(f2).join("  ")], ["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.scores.map(f2), ...item.strengths, ...item.development] }; }
+  if (item.family === "key-findings") { const rows = [["Scoruri", item.scores.map(f2).join("  ")], ...(item.noRanking ? [] : [["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]])]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.scores.map(f2), ...item.strengths, ...item.development] }; }
   if (item.family === "benchmark") { const table = item.table; const rows = table.competencyMeans.map((row) => [row.competency, f2(row.mean)]); rows.push([`Peste ${f2(table.high)}`, `${table.shares.above}%`], [`Între ${f2(table.low)} – ${f2(table.high)}`, `${table.shares.in}%`], [`Sub ${f2(table.low)}`, `${table.shares.below}%`], ["Medii individuale", table.rows.map((row) => f2(row.value)).join("  ")]); return { kind: "table", rows, sourceValues: [...table.competencyMeans.flatMap((row) => [row.competency, f2(row.mean)]), `${table.shares.above}%`, `${table.shares.in}%`, `${table.shares.below}%`, ...table.rows.map((row) => f2(row.value))] }; }
   if (item.family === "behavior") { const count = Math.max(item.key.length, item.development.length); const rows = [["Abilități cheie", "Abilități de dezvoltat"], ...Array.from({ length: count }, (_, index) => [item.key[index] || "", item.development[index] || ""])]; return { kind: "table", header: true, rows, sourceValues: [...item.key, ...item.development] }; }
   return { kind: "table", rows: [], sourceValues: [] };
@@ -1858,7 +1884,7 @@ function mountPreview(root,payload,options={}){const plan=reportPlan(payload,{sc
 
 Object.assign(window.__grf||(window.__grf={}),{mountPreview});})();
 
-(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,reportPlan}=window.__grf;
+(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,reportPlan,unrankedCompetencies}=window.__grf;
 if (!window.XLSX || !window.JSZip) throw new Error("Lipsesc bibliotecile locale necesare");
 
 let files = [];
@@ -1929,6 +1955,11 @@ function renderStructure() {
   const main = plan.filter((slide) => slide.deliverable !== "appendix");
   const appendix = plan.filter((slide) => slide.deliverable === "appendix");
   root.innerHTML = `<div class="structure-card"><strong>Trend · raport principal</strong><span>${main.length} slide-uri</span><small>Întregul proiect primul; grupurile CODE urmează doar când activezi împărțirea.</small></div><div class="structure-card"><strong>Anexă</strong><span>${appendix.length ? `${appendix.length} slide-uri` : "dezactivată"}</span><small>${payload.metadata.annex === "separate" ? "Se descarcă separat." : payload.metadata.annex === "none" ? "Nu se generează." : "Se include la final."}</small></div>`;
+  for (const competency of unrankedCompetencies(payload)) {
+    const note = document.createElement("p"); note.className = "structure-card methodology-warning"; note.setAttribute("role", "status");
+    note.textContent = `Competența ${competency} are un singur comportament evaluat: fără clasament (fără „Comportamente cheie” și fără casetele de abilități pe slide-ul de constatări).`;
+    root.append(note);
+  }
   const missingMethodology = methodologyColumns(payload).missingLabels || [];
   if (missingMethodology.length) {
     const warning = document.createElement("p");

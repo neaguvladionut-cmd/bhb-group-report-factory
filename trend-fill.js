@@ -321,7 +321,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, fixedAxis = false, plotLayout = null } = {}) {
+export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, outsideLabels = null, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -345,6 +345,13 @@ export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], c
         const points = data.categories.map((_, pointIndex) => sample.replace(/<c:idx val="\d+"\/>/u, `<c:idx val="${pointIndex}"/>`).replace(/<a:srgbClr val="[0-9A-F]{6}"/iu, `<a:srgbClr val="${categoryColors[pointIndex % categoryColors.length]}"`)).join("");
         body = body.replace(/<c:dPt>[\s\S]*?<\/c:dPt>/gu, "").replace(/(<\/c:spPr>)(\s*<c:invertIfNegative\b[^>]*\/>)?/u, `$1$2${points}`);
       }
+    }
+    if (outsideLabels?.[index]?.length && /<c:dLbls>/u.test(body)) {
+      const labels = body.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/u)[0];
+      const spPr = labels.match(/<c:spPr>[\s\S]*?<\/c:spPr>/u)?.[0] || "";
+      const txPr = (labels.match(/<c:txPr>[\s\S]*?<\/c:txPr>/u)?.[0] || "").replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/u, '<a:solidFill><a:srgbClr val="003057"/></a:solidFill>');
+      const points = outsideLabels[index].map((point) => `<c:dLbl><c:idx val="${point}"/>${spPr}${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
+      body = body.replace(/<c:dLbls>/u, `<c:dLbls>${points}`);
     }
     if (index >= templateSeries.length && seriesColors[index]) body = setSeriesFill(body, seriesColors[index]);
     if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
