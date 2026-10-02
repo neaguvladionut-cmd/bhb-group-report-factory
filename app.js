@@ -389,6 +389,10 @@ Object.assign(window.__grf||(window.__grf={}),{CALCULATION_VERSION,EVAL_SHEET_HE
 // fill layer writes into that slide's named shapes; nothing here is rendered free-form.
 
 const text = (value) => String(value ?? "").trim();
+const displayDate = (value) => {
+  const raw = text(value); const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/u); if (iso) return `${iso[3].padStart(2, "0")}.${iso[2].padStart(2, "0")}.${iso[1]}`;
+  const dmy = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/u); return dmy ? `${dmy[1].padStart(2, "0")}.${dmy[2].padStart(2, "0")}.${dmy[3]}` : raw;
+};
 const f2 = (value) => value !== null && value !== "" && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "";
 const pct = (count, total) => total ? Math.round(count / total * 100) : 0;
 const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
@@ -540,7 +544,7 @@ function methodologyColumns(payload) {
     { number: "", text: population, keep: true },
     { number: consultants, text: "consultanți TREND implicați", keep: Boolean(consultants) },
     { number: days, text: `${days === "1" ? "zi" : "zile"} de evaluare${period ? ` · ${period}` : ""}`, keep: Boolean(days) },
-    { number: teamSize, text: "consultanți în echipa fiecărui participant", keep: Boolean(teamSize) },
+    { number: "", text: teamSize ? `Fiecare participant a fost observat de o echipă formată din ${teamSize} consultanți` : "", keep: Boolean(teamSize) },
     { number: "", text: location ? `Evaluarea a fost organizată la ${location}` : "", keep: Boolean(location) },
     { number: String((payload.behaviorAggregates || []).length), text: "comportamente specifice observate", keep: true },
     { number: exerciseCount, text: `exerciții concepute pentru a evidenția nivelul competențelor evaluate${exerciseList ? `: ${exerciseList}` : ""}`, keep: Boolean(exerciseCount) }
@@ -735,7 +739,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   const client = text(metadata.clientName || metadata.projectName);
   const project = text(metadata.projectName) || "Proiect Trend";
   const program = text(metadata.program) || "Centru de Dezvoltare";
-  const reportDate = text(metadata.reportDate) || new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
+  const reportDate = displayDate(metadata.reportDate) || new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
   const year = reportDate.match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
   const groups = metadata.splitGroups && (payload.groups || []).length >= 2 ? payload.groups.map((group) => [viewForGroup(payload, group), group.code]) : [];
   const eachScope = (builder, target) => { builder(target, payload); groups.forEach(([view, code]) => builder(target, view, code)); };

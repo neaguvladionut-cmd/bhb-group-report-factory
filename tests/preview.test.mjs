@@ -26,8 +26,8 @@ test("methodology has editable unknown fields and no internal score language", (
   assert.doesNotMatch(copy, /0\s*[–,-]\s*1\s*[–,-și ]+2|\(0-2\)/u);
   const edited = methodologyColumns({ ...payload, metadata: { ...payload.metadata, evaluators: "4", days: "3", exercises: "un exercițiu de grup, un studiu de caz" } });
   assert.deepEqual(edited.facts.slice(1, 3).map((fact) => fact.number), ["4", "3"]);
-  assert.equal(edited.facts[4].number, "2");
-  assert.match(edited.facts[4].text, /: un exercițiu de grup, un studiu de caz$/u);
+  assert.equal(edited.facts.at(-1).number, "2");
+  assert.match(edited.facts.at(-1).text, /: un exercițiu de grup, un studiu de caz$/u);
 });
 
 test("behaviour insights follow the fixed summed-score cuts", () => {

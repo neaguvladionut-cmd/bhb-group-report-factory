@@ -45,12 +45,28 @@ function rowsFromWorkbook(XLSX, bytes, sourceName = "") {
 }
 
 const findHeader = (rows, predicate) => rows.findIndex((row) => predicate(row.map(folded)));
+const splitPeople = (value) => text(value).split(/[,;/]/u).map(text).filter(Boolean).filter((name) => !/(?:sistem|system)/iu.test(name));
+const excelDate = (value) => typeof value === "number" && Number.isFinite(value) ? new Date(Date.UTC(1899, 11, 30) + value * 86400000) : value instanceof Date ? value : null;
+const romanianDate = (value) => {
+  const date = excelDate(value);
+  if (date) return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(date);
+  const raw = text(value);
+  const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/u);
+  if (iso) return `${iso[3].padStart(2, "0")}.${iso[2].padStart(2, "0")}.${iso[1]}`;
+  const dmy = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/u);
+  return dmy ? `${dmy[1].padStart(2, "0")}.${dmy[2].padStart(2, "0")}.${dmy[3]}` : raw;
+};
 const methodFacts = (rows, headerRow) => {
   const header = (rows[headerRow] || []).map(folded);
   const values = (name) => { const index = header.indexOf(name); return index < 0 ? [] : rows.slice(headerRow + 1).map((row) => text(row[index])).filter(Boolean); };
   const evaluatorIndexes = ["principal evaluator", "secondary evaluator", "evaluator 3", "evaluator 4", "evaluatori"].map((name) => header.indexOf(name)).filter((index) => index >= 0);
-  const teamSizes = rows.slice(headerRow + 1).map((row) => new Set(evaluatorIndexes.flatMap((index) => text(row[index]).split(/[,;/]/u).map(text).filter(Boolean))).size).filter(Boolean);
-  return { evaluators: ["principal evaluator", "secondary evaluator", "evaluator 3", "evaluator 4", "evaluatori"].flatMap(values), dates: [...values("invited at"), ...values("date")], locations: [...values("certification location"), ...values("regiune")], teamSizes };
+  const evaluators = [...new Set(rows.slice(headerRow + 1).flatMap((row) => evaluatorIndexes.flatMap((index) => splitPeople(row[index]))))];
+  const teamSizes = rows.slice(headerRow + 1).map((row) => new Set(evaluatorIndexes.flatMap((index) => splitPeople(row[index]))).size).filter(Boolean);
+  const dates = [...new Set(values("date").map(romanianDate).filter(Boolean))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
+  const location = [...new Set(values("certification location"))];
+  const jobIndex = header.indexOf("job");
+  const populationByRole = jobIndex < 0 ? [] : [...new Map(rows.slice(headerRow + 1).map((row) => text(row[jobIndex])).filter((role) => role && !/^x$/iu.test(role)).map((role) => [role, 0])).entries()].map(([role]) => ({ role, count: rows.slice(headerRow + 1).filter((row) => text(row[jobIndex]) === role).length }));
+  return { evaluators, dates, locations: location, teamSizes, populationByRole };
 };
 
 export function detectSchema(XLSX, bytes, sourceName = "export.xlsx") {
@@ -305,6 +321,19 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const descriptorWarnings = [];
   const aggregates = behaviorAggregates(parsedDetailed.behaviorRecords, includedIdentities, descriptors, descriptorWarnings);
   warnings.push(...descriptorWarnings);
+  const methodologySource = detailed?.methodology || { evaluators: [], dates: [], locations: [], teamSizes: [], populationByRole: [] };
+  const teamSizeCounts = new Map();
+  for (const size of methodologySource.teamSizes || []) teamSizeCounts.set(size, (teamSizeCounts.get(size) || 0) + 1);
+  const commonTeamSize = [...teamSizeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || null;
+  const methodology = {
+    evaluatorNames: methodologySource.evaluators || [],
+    dates: methodologySource.dates || [],
+    period: methodologySource.dates?.length ? { first: methodologySource.dates[0], last: methodologySource.dates.at(-1) } : null,
+    teamSizes: methodologySource.teamSizes || [],
+    commonTeamSize,
+    locations: methodologySource.locations || [],
+    populationByRole: methodologySource.populationByRole || []
+  };
   const acknowledged = new Set(reviewState.acknowledgedWarningIds || []);
   const finalWarnings = warnings.map((item) => ({ ...item, reviewed: acknowledged.has(item.id) }));
   const groups = codeValues.map((code) => ({ code, name: code, records: records.filter((record) => record.code === code) }));
@@ -315,7 +344,7 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
     calculationVersion: CALCULATION_VERSION,
     createdAt: new Date().toISOString(),
     metadata: { ...metadata, projectName: text(metadata.projectName), clientName: text(metadata.clientName), reportDate: text(metadata.reportDate), annex: metadata.annex || "end", splitGroups: Boolean(metadata.splitGroups), groupNames: metadata.groupNames || {}, slideToggles: metadata.slideToggles || {} },
-    schemas, sourceShape: { summary: summaries.length, detailed: detailedSources.length, descriptors: descriptorSources.length }, competencies: parsedSummary.competencies, records, auditRecords, behaviorRecords: parsedDetailed.behaviorRecords, behaviorAggregates: aggregates,
+    schemas, methodology, sourceShape: { summary: summaries.length, detailed: detailedSources.length, descriptors: descriptorSources.length }, competencies: parsedSummary.competencies, records, auditRecords, behaviorRecords: parsedDetailed.behaviorRecords, behaviorAggregates: aggregates,
     calculations, groups, zones, zoneCalculations, codeReadiness: { available: codeValues.length, blank: codeMissing.length, groups: codeValues, splitAvailable: codeValues.length >= 2 }, regionReadiness: { available: zones.length, blank: regionMissing.length, disabledReason: zones.length ? "" : "Nu există valori de regiune în exportul detaliat." },
     participantCounts: { total: parsedSummary.records.length, included: records.length, excludedUnrated: parsedSummary.records.filter((record) => record.inclusion === "excluded-unrated").length }, bands, blockers, warnings: finalWarnings, warningReviews: finalWarnings, corrections: Object.values(corrections.values || {}).filter((item) => item?.mode === "value"), readiness: blockers.length === 0 && finalWarnings.every((item) => item.reviewed), descriptorTemplate
   };

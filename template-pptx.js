@@ -257,8 +257,8 @@ const newId = () => nextNewId++;
 
 function fillCover(xml, item) {
   xml = fill(xml, 15, [item.title]);
+  xml = updateShape(xml, 12, (shape) => setRunText(shape, 0, `Raport de grup · ${item.reportDate || ""}${item.annexMark ? " – Anexă" : ""}`));
   xml = updateShape(xml, 23, (shape) => setRunText(shape, 0, item.year));
-  if (item.annexMark) xml = updateShape(xml, 12, (shape) => appendToLastRun(shape, " – Anexă"));
   const logo = xfrmOf(getShape(xml, 20));
   const style = setRPrColor(templateParagraphs(getShape(xml, 12))[0].rPrs[0], NAVY);
   return addToTree(xml, fitTitleOneLine(newTextShape({ id: newId(), name: "confidential", x: logo.x, y: logo.y + logo.cy + 0.15 * EMU, cx: logo.cx, cy: 0.6 * EMU, rPr: style, text: "CONFIDENȚIAL", align: "ctr" }), { minScale: 0.5 }).xml);

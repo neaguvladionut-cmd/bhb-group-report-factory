@@ -94,9 +94,9 @@ test("section order follows the template: main, ANEXĂ block, Concluzii last, wh
 
 test("M1–M4: cover, how-to-read, methodology and executive summary fill their named shapes", () => {
   const [cover, howTo, method, summary] = whole.slides;
-  assert.equal(text(getShape(cover, 15)), "Client sintetic cu etichete românești lungi – Centru de Dezvoltare");
+  assert.equal(text(getShape(cover, 15)), "Proiect sintetic GRF-R – Centru de Dezvoltare");
   assert.match(text(getShape(cover, 23)), /^2026 © www\.trendconsult\.eu/u);
-  assert.equal(text(getShape(cover, 12)), "Raport de grup");
+  assert.equal(text(getShape(cover, 12)), "Raport de grup · 01.10.2026");
   assert.match(cover, /GRF-R new:confidential[\s\S]*?CONFIDENȚIAL/u);
   assert(xfrmOf(cover.slice(cover.indexOf("GRF-R new:confidential") - 200)).y > xfrmOf(getShape(cover, 20)).y + xfrmOf(getShape(cover, 20)).cy);
   assert.equal(text(getShape(howTo, 93)), "CUM CITIM ACEST RAPORT");
@@ -236,7 +236,7 @@ test("no undefined/null/NaN or template example data in any generated slide", ()
 
 test("separate annex file: cover with „Anexă”, A1–A4, closing", async () => {
   const annex = await deck(payloadOf(acceptance, { annex: "separate" }), "appendix");
-  assert.equal(annex.plan[0].family, "cover"); assert.match(text(getShape(annex.slides[0], 12)), /Raport de grup – Anexă/u);
+  assert.equal(annex.plan[0].family, "cover"); assert.match(text(getShape(annex.slides[0], 12)), /Raport de grup · 01.10.2026 – Anexă/u);
   assert.equal(annex.plan.at(-1).family, "close");
   assert(annex.plan.slice(1, -1).every((item) => item.deliverable === "appendix"));
   const main = await deck(payloadOf(acceptance, { annex: "separate" }), "main");
