@@ -367,6 +367,13 @@ const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark"
 const PARTICIPANT_START_CAPS = { "participant-mean": 25, "participant-comparison": 5, "competency-participants": 20 };
 // A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
 // segment, and at least a quarter of the whole name (F34).
+const A2_LABEL_COLUMN_IN = 4.3;
+/** Lines a participant name takes at `size` pt in `width` pt, breaking at spaces and after hyphens. */
+function wrapLabel(name, size, width) {
+  const parts = String(name).split(/(?<=-)|\s+/u).filter(Boolean); const charWidth = size * 0.55; let lines = 1; let line = 0;
+  for (const part of parts) { const w = part.length * charWidth; if (line && line + w > width) { lines += 1; line = w; } else line += w + (part.endsWith("-") ? 0 : charWidth); while (line > width + charWidth) { lines += 1; line -= width; } }
+  return lines;
+}
 const labelChars = (name) => Math.max(...String(name).split(/[\s-]+/u).map((part) => part.length + 1), Math.ceil(String(name).length / 4));
 function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } = {}) {
   if (family === "participant-mean") { // horizontal bars on a plot ≈ 8.0 in tall, gap 150 %: label ≥ 10 pt, bar ≥ 0.12 in
@@ -588,8 +595,14 @@ function appendixSlides(payload) {
   const participants = payload.records.map((record) => ({ name: record.name, mean: overallMean(record), scores: record.scores || {} })).filter((row) => Number.isFinite(row.mean)).sort((a, b) => b.mean - a.mean);
   const longestLabel = Math.max(0, ...participants.map((row) => labelChars(row.name)));
   add("appendix-divider", { title: "Anexă – rezultate individuale", heading: "Anexă", subheading: "rezultate individuale" });
-  const meanPages = splitEqual(participants, participantsPerSlide("participant-mean", { longestLabel }));
-  meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length }));
+  // Rule 10 for A2: each name wraps (at spaces and after hyphens) inside a label column of ≤ 4.3 in; a slide holds as
+  // many participants as keep every label ≥ 10 pt on its own rows, split into equal pages.
+  const plotPoints = 0.9 * 9.25 * 72; const columnPoints = A2_LABEL_COLUMN_IN * 72;
+  const slotFor = (size) => Math.max(...participants.map((row) => wrapLabel(row.name, size, columnPoints))) * size * 1.3 + 6;
+  const meanCap = Math.max(1, Math.min(PARTICIPANT_START_CAPS["participant-mean"], Math.floor(plotPoints / Math.max(slotFor(10), 0.3 * 72))));
+  const meanPages = splitEqual(participants, meanCap);
+  let meanSize = 24; while (meanSize > 10 && !meanPages.every((rows) => slotFor(meanSize) <= plotPoints / Math.max(1, rows.length))) meanSize -= 1;
+  meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length, labelSize: meanSize * 100 }));
   const comparisonPages = splitEqual(participants, participantsPerSlide("participant-comparison", { seriesCount: competencies.length, longestLabel }));
   comparisonPages.forEach((rows, page) => add("participant-comparison", { rows, competencies, page: page + 1, pages: comparisonPages.length }));
   competencies.forEach((competency, competencyIndex) => {
@@ -634,7 +647,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
 
-Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
+Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
 
 (()=>{
 // BP-GRF-R fill layer: writes plan data into the named shapes of a cloned Trend template slide
@@ -1077,7 +1090,7 @@ function chartSpec(item) {
   if (item.family === "ranking") return { data: { categories: ["Media"], series: item.items.map((row) => ({ name: competencyLabel(row.competency), values: [row.mean] })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH }, band: { id: 2, axis: "x" } };
   if (item.family === "population") return { data: { categories: item.rows.map((row) => row.competency), series: [{ name: "Low", values: item.rows.map((row) => row.below / 100) }, { name: "BENCH", values: item.rows.map((row) => row.in / 100) }, { name: "High", values: item.rows.map((row) => row.above / 100) }] }, options: {} };
   if (item.family === "zone") return { data: { categories: item.competencies, series: item.regions.map((region, index) => ({ name: region, values: item.values[index] })) }, options: { fixedAxis: true, categoryColors: ZONE_CATEGORY_COLORS }, band: { id: 2, axis: "y" } };
-  if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => row.name), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true }, band: { id: 3, axis: "x" } };
+  if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true }, band: { id: 3, axis: "x" } };
   if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { ids: [2, 10], axis: "y" } };
   if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { id: 3, axis: "y" } };
   return null;
@@ -1135,10 +1148,10 @@ function chartLayout(item, chartXml, slideXml, spec) {
     const frame = xfrmOf(getShape(slideXml, 2)); const band = visualBox(getShape(slideXml, 3));
     const perPoint = band.cx / (high - low); const right = band.x + (5 - low) * perPoint; // x(5) from the template rectangle
     const top = frame.y + 0.07 * frame.cy; const height = 0.9 * frame.cy; const slot = height / Math.max(1, item.rows.length) / PT;
-    const size = Math.max(1000, Math.min(axisLabelSize(chartXml, "catAx"), Math.floor(slot / 2.6) * 100));
-    // A name wraps only at spaces: the label column must hold its longest word, and half of the name at most.
-    const needed = Math.max(...item.rows.map((row) => { const name = String(row.name); return Math.max(...name.split(/\s+/u).map((word) => word.length), Math.ceil(name.length / 2)); }));
-    const labelWidth = (needed * size / 100 * 0.6 + 24) * PT;
+    const size = Math.max(1000, Math.min(axisLabelSize(chartXml, "catAx"), item.labelSize || 1000));
+    // The label column holds the names on wrapped lines (≤ 4.3 in), never wider than the longest name needs.
+    const widest = Math.max(...item.rows.map((row) => String(row.name).length * size / 100 * 0.55));
+    const labelWidth = (Math.min(4.3 * 72, widest) + 24) * PT;
     const left = Math.max(right - 4 * perPoint, frame.x + labelWidth);
     options.plotLayout = { x: (left - frame.x) / frame.cx, y: 0.07, w: (Math.min(right, frame.x + frame.cx * 0.99) - left) / frame.cx, h: 0.9 };
     const plotRight = left + options.plotLayout.w * frame.cx; const scale = (plotRight - left) / 4;
@@ -1641,7 +1654,9 @@ function bundleContent(item) {
   if (spec) {
     const percent = item.family === "population";
     const series = spec.data.series.map((entry) => ({ name: entry.name, values: entry.values.map(roundChartValue) }));
-    return { kind: "chart", categories: spec.data.categories, series, scale: percent ? [0, 1] : [1, 5], percent, sourceValues: [...spec.data.categories, ...series.map((entry) => entry.name), ...series.flatMap((entry) => entry.values.map(chartValueText).filter(Boolean))] };
+    // Zero-width breaks are a deck-only rendering aid: the bundle carries clean names.
+    const categories = spec.data.categories.map((category) => String(category).replace(/[\u200B-\u200D\u2060\uFEFF]/gu, ""));
+    return { kind: "chart", categories, series, scale: percent ? [0, 1] : [1, 5], percent, sourceValues: [...categories, ...series.map((entry) => entry.name), ...series.flatMap((entry) => entry.values.map(chartValueText).filter(Boolean))] };
   }
   if (item.family === "key-findings") { const rows = [["Scoruri", item.scores.map(f2).join("  ")], ["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.scores.map(f2), ...item.strengths, ...item.development] }; }
   if (item.family === "benchmark") { const table = item.table; const rows = table.competencyMeans.map((row) => [row.competency, f2(row.mean)]); rows.push([`Peste ${f2(table.high)}`, `${table.shares.above}%`], [`Între ${f2(table.low)} – ${f2(table.high)}`, `${table.shares.in}%`], [`Sub ${f2(table.low)}`, `${table.shares.below}%`], ["Medii individuale", table.rows.map((row) => f2(row.value)).join("  ")]); return { kind: "table", rows, sourceValues: [...table.competencyMeans.flatMap((row) => [row.competency, f2(row.mean)]), `${table.shares.above}%`, `${table.shares.in}%`, `${table.shares.below}%`, ...table.rows.map((row) => f2(row.value))] }; }

@@ -43,6 +43,13 @@ export const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "ben
 export const PARTICIPANT_START_CAPS = { "participant-mean": 25, "participant-comparison": 5, "competency-participants": 20 };
 // A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
 // segment, and at least a quarter of the whole name (F34).
+export const A2_LABEL_COLUMN_IN = 4.3;
+/** Lines a participant name takes at `size` pt in `width` pt, breaking at spaces and after hyphens. */
+export function wrapLabel(name, size, width) {
+  const parts = String(name).split(/(?<=-)|\s+/u).filter(Boolean); const charWidth = size * 0.55; let lines = 1; let line = 0;
+  for (const part of parts) { const w = part.length * charWidth; if (line && line + w > width) { lines += 1; line = w; } else line += w + (part.endsWith("-") ? 0 : charWidth); while (line > width + charWidth) { lines += 1; line -= width; } }
+  return lines;
+}
 export const labelChars = (name) => Math.max(...String(name).split(/[\s-]+/u).map((part) => part.length + 1), Math.ceil(String(name).length / 4));
 export function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } = {}) {
   if (family === "participant-mean") { // horizontal bars on a plot ≈ 8.0 in tall, gap 150 %: label ≥ 10 pt, bar ≥ 0.12 in
@@ -264,8 +271,14 @@ function appendixSlides(payload) {
   const participants = payload.records.map((record) => ({ name: record.name, mean: overallMean(record), scores: record.scores || {} })).filter((row) => Number.isFinite(row.mean)).sort((a, b) => b.mean - a.mean);
   const longestLabel = Math.max(0, ...participants.map((row) => labelChars(row.name)));
   add("appendix-divider", { title: "Anexă – rezultate individuale", heading: "Anexă", subheading: "rezultate individuale" });
-  const meanPages = splitEqual(participants, participantsPerSlide("participant-mean", { longestLabel }));
-  meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length }));
+  // Rule 10 for A2: each name wraps (at spaces and after hyphens) inside a label column of ≤ 4.3 in; a slide holds as
+  // many participants as keep every label ≥ 10 pt on its own rows, split into equal pages.
+  const plotPoints = 0.9 * 9.25 * 72; const columnPoints = A2_LABEL_COLUMN_IN * 72;
+  const slotFor = (size) => Math.max(...participants.map((row) => wrapLabel(row.name, size, columnPoints))) * size * 1.3 + 6;
+  const meanCap = Math.max(1, Math.min(PARTICIPANT_START_CAPS["participant-mean"], Math.floor(plotPoints / Math.max(slotFor(10), 0.3 * 72))));
+  const meanPages = splitEqual(participants, meanCap);
+  let meanSize = 24; while (meanSize > 10 && !meanPages.every((rows) => slotFor(meanSize) <= plotPoints / Math.max(1, rows.length))) meanSize -= 1;
+  meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length, labelSize: meanSize * 100 }));
   const comparisonPages = splitEqual(participants, participantsPerSlide("participant-comparison", { seriesCount: competencies.length, longestLabel }));
   comparisonPages.forEach((rows, page) => add("participant-comparison", { rows, competencies, page: page + 1, pages: comparisonPages.length }));
   competencies.forEach((competency, competencyIndex) => {

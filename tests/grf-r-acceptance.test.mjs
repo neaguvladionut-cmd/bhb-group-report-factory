@@ -240,3 +240,46 @@ test("F21: on the pinned charts (M7 box plot, A2) the rendered band lands on the
     }
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+test("A2 render: every participant label is its own readable block (≥ 10 pt, no overlap)", async (t) => {
+  const soffice = await tool("soffice"); const pdftoppm = await tool("pdftoppm");
+  if (!soffice || !pdftoppm || !(await binaryCommandAvailable("python3"))) { t.skip("LibreOffice, Poppler or Python is unavailable"); return; }
+  const { createFixture: inspectorFixture } = await import("./fixtures/grf-r-insp5-fixture.mjs");
+  const source = inspectorFixture(XLSX);
+  const temp = await mkdtemp(join(tmpdir(), "grf-r-a2-"));
+  try {
+    const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: source.summary }, { name: "detail.xlsx", bytes: source.detailed }], { ...source.metadata, splitGroups: false }, {}, { acknowledgedWarningIds: [] });
+    const plan = reportPlan(payload); const generated = await generatedDeck(payload);
+    await writeFile(join(temp, "a2.pptx"), generated.bytes);
+    await run(soffice, ["--headless", "--convert-to", "pdf", "--outdir", temp, join(temp, "a2.pptx")], { timeout: 300000 });
+    for (const [index, item] of plan.entries()) {
+      if (item.family !== "participant-mean") continue;
+      const slide = await generated.zip.file(`ppt/slides/slide${index + 1}.xml`).async("string");
+      const rel = (await generated.zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`).async("string")).match(/Target="\.\.\/charts\/(chart\d+\.xml)"/u)[1];
+      const chart = await generated.zip.file(`ppt/charts/${rel}`).async("string");
+      const frameShape = slide.slice(slide.lastIndexOf("<p:graphicFrame", slide.indexOf('<p:cNvPr id="2"')));
+      const [fx, fy, fw, fh] = frameShape.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/u).slice(1).map((value) => Number(value) / 914400);
+      const lx = Number(chart.match(/<c:manualLayout>[\s\S]*?<c:x val="([^"]+)"/u)[1]);
+      await run(pdftoppm, ["-png", "-r", "100", "-f", String(index + 1), "-l", String(index + 1), join(temp, "a2.pdf"), join(temp, `p${index}`)]);
+      const file = (await readdir(temp)).find((name) => name.startsWith(`p${index}`) && name.endsWith(".png"));
+      const { stdout } = await run("python3", ["-c", `import json,sys
+from PIL import Image
+a=json.loads(sys.argv[1]); im=Image.open(a['png']).convert('L'); d=100
+x0=int((a['fx']+0.05)*d); x1=int((a['fx']+a['lx']*a['fw'])*d)-12; y0=int((a['fy']+0.07*a['fh'])*d); y1=int((a['fy']+0.97*a['fh'])*d)
+rows=[any(im.getpixel((x,y))<140 for x in range(x0,x1)) for y in range(y0,y1)]
+spans=[]; start=None
+for i,r in enumerate(rows+[False]):
+  if r and start is None: start=i
+  if not r and start is not None: spans.append([start,i]); start=None
+merged=[]
+for a0,a1 in spans:
+  if merged and a0-merged[-1][1]<=4: merged[-1][1]=a1
+  else: merged.append([a0,a1])
+print(json.dumps([b-a for a,b in merged]))`, JSON.stringify({ png: join(temp, file), fx, fy, fw, fh, lx })]);
+      const blocks = JSON.parse(stdout).filter((height) => height >= 3);
+      assert(blocks.length >= item.rows.length, `slide ${index + 1}: ${blocks.length} label blocks for ${item.rows.length} participants (labels overlap or are missing)`);
+      const glyph = Math.min(...blocks); // one line of ≥ 10 pt text is at least ~9 px tall at 100 dpi (cap height + descender)
+      assert(glyph >= 9, `slide ${index + 1}: label lines are ${glyph} px tall at 100 dpi (< 10 pt)`);
+    }
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});

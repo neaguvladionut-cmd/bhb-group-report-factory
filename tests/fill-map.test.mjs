@@ -232,7 +232,7 @@ test("bundle (F15): one cropped item per chart and table, values equal to the de
     assert.doesNotMatch(svg, /<text|<image|href=|font-family|undefined|NaN/u);
     const slideIndex = entry.deckSlide - 1; assert.equal(split.plan[slideIndex].title, entry.title);
     const charts = await split.chartsOf(slideIndex);
-    const haystack = decode(split.slides[slideIndex] + charts.map((chart) => chart.chart).join(""));
+    const haystack = decode(split.slides[slideIndex] + charts.map((chart) => chart.chart).join("")).replace(/[\u200B-\u200D\u2060\uFEFF]/gu, "");
     for (const value of entry.sourceValues) assert(haystack.includes(value), `bundle item ${entry.id} value ${value} is not in deck slide ${entry.deckSlide}`);
   }
 });
@@ -407,4 +407,29 @@ test("F36: each bundle image carries its own heading; files are named NN-item-sc
 test("F39: with every slide type off and no annex the how-to-read keeps only the opening and the closing sentence", () => {
   const off = reportPlan(payloadOf(insp5, { annex: "none", slideToggles: { range: false, competencyMean: false, benchmark: false, competencyDistribution: false, zone: false, observation: false, behavior: false, conclusions: false } }));
   assert.deepEqual(off.find((item) => item.family === "how-to-read").paragraphs, ["Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim.", "Rezultatele descriu grupul evaluat."]);
+});
+
+test("A2 follows rule 10: labels ≥ 10 pt, one size per series, equal readable pages (insp5: 11 + 11)", async () => {
+  const pages = insp5Deck.plan.map((item, index) => [item, index]).filter(([item]) => item.family === "participant-mean");
+  assert.deepEqual(pages.map(([item]) => item.rows.length), [11, 11]);
+  assert.equal(new Set(pages.map(([item]) => item.labelSize)).size, 1);
+  for (const [item, index] of pages) {
+    const [{ chart }] = await insp5Deck.chartsOf(index);
+    const size = Number(chart.match(/<c:catAx>[\s\S]*?<a:defRPr\b[^>]*\bsz="(\d+)"/u)[1]);
+    assert(size >= 1000, `A2 label ${size / 100} pt`); assert.equal(size, Math.min(2400, item.labelSize));
+  }
+});
+
+test("zero-width breaks stay in the deck's charts: bundle and audit carry clean names", async () => {
+  const invisible = /[\u200B\u200C\u200D\u2060\uFEFF]/u;
+  const payload = payloadOf(insp5, { splitGroups: true });
+  const artifacts = await buildBundleArtifacts(XLSX, payload);
+  assert.doesNotMatch(JSON.stringify(artifacts.manifest), invisible);
+  for (const item of artifacts.svg) { assert.doesNotMatch(item.name, invisible); assert.doesNotMatch(item.content, invisible); }
+  for (const layout of artifacts.layouts) for (const text of layout.texts) assert.doesNotMatch(text.line, invisible);
+  const data = XLSX.read(artifacts.workbookBytes, { type: "array" });
+  for (const name of data.SheetNames) for (const row of XLSX.utils.sheet_to_json(data.Sheets[name], { header: 1, defval: "" })) for (const cell of row) assert.doesNotMatch(String(cell), invisible);
+  const { createAuditWorkbook } = await import("../src/rebuild-core.js");
+  const audit = createAuditWorkbook(XLSX, payload);
+  for (const name of audit.SheetNames) for (const row of XLSX.utils.sheet_to_json(audit.Sheets[name], { header: 1, defval: "" })) for (const cell of row) assert.doesNotMatch(String(cell), invisible);
 });
