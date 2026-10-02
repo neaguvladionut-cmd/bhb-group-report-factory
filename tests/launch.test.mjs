@@ -30,7 +30,9 @@ test("deploy is the source-owned one-page Romanian builder with the approved fou
   assert.match(app, /data-issue-search/u);
   assert.match(app, /Confirmă toate avertismentele/u);
   assert.doesNotMatch(app, /PptxGenJS/u);
-  assert.match(css, /\.issue-items\{[^}]*max-height:205px/u);
+  assert.match(css, /\.issue-panel\{/u);
+  assert.match(css, /\.issue-toggle/u);
+  assert.doesNotMatch(css, /\.issue-items\{[^}]*overflow/u);
   assert.match(css, /\.workflow-rail\{/u);
   assert.match(source, /id="step-upload"/u);
   assert.match(source, /id="step-download"/u);

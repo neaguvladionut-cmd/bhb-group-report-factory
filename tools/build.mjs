@@ -35,7 +35,8 @@ const bundle=[
   await moduleSource("trend-fill.js"),
   await moduleSource("template-pptx.js"),
   await moduleSource("preview.js"),
-  `(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,reportPlan,unrankedCompetencies}=window.__grf;\n${appSource}\n})();`
+  await moduleSource("rebuild-issues.js"),
+  `(()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,renderIssueGroup,reportPlan,unrankedCompetencies}=window.__grf;\n${appSource}\n})();`
 ].join("\n\n");
 await writeFile(resolve(deploy,"app.js"),bundle);
 const servedEntries = ["app.js", "core.js", "cover-preview.css", "index.html", "pptx.js", "preview.js", "report-plan.js", "styles.css", "assets"];

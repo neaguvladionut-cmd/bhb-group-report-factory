@@ -103,11 +103,14 @@ test("GRF-UX scale fixture keeps 155 identical blockers on one bounded, searchab
   const payload = buildPayload(XLSX, [{ name: "summary-export-synthetic.xlsx", bytes: workbook(rows) }], { projectName: "Synthetic scale fixture" });
   assert.equal(payload.blockers.filter((item) => item.code === "summary-score").length, 155);
   const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  const issueRenderer = await readFile(resolve(root, "src/rebuild-issues.js"), "utf8");
   const css = await readFile(resolve(root, "src/styles.css"), "utf8");
   assert.match(app, /groupedIssues\(blockers, "blocker"\)/u);
-  assert.match(app, /data-issue-search/u);
-  assert.match(css, /\.issue-items\{[^}]*max-height:205px/u);
-  assert.match(css, /\.issue-items\{[^}]*overflow:auto/u);
+  assert.match(app, /renderIssueGroup/u);
+  assert.match(issueRenderer, /data-issue-search/u);
+  assert.match(css, /\.issue-panel\{/u);
+  assert.match(css, /\.issue-toggle/u);
+  assert.doesNotMatch(css, /\.issue-items\{[^}]*overflow/u);
 });
 
 test("R5 by mean (Vlad 2026-10-02): complete data keeps the sum order; missing scores rank by mean; spread then column order break ties", async () => {
