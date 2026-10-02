@@ -928,7 +928,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, fixedAxis = false, plotLayout = null } = {}) {
+function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -962,6 +962,11 @@ function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], category
   if (labelSize) output = output.replace(/(<c:catAx>[\s\S]*?<\/c:catAx>)/u, (axis) => axis.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/u, (whole, head, size, tail) => `${head}${Math.min(Number(size), labelSize)}${tail}`));
   if (dataLabelSize) output = output.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/gu, (labels) => labels.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/gu, (whole, head, size, tail) => `${head}${Math.min(Number(size), dataLabelSize)}${tail}`));
   if (plotLayout) output = setPlotLayout(output, plotLayout);
+  if (valueOnlyLabels) output = output.replace(/<c:showSerName val="1"\/>/gu, '<c:showSerName val="0"/>').replace(/<c:showVal val="0"\/>/gu, '<c:showVal val="1"/>').replace(/<c:separator>[^<]*<\/c:separator>/gu, "");
+  if (legend) {
+    const legendXml = `<c:legend><c:legendPos val="b"/><c:layout><c:manualLayout><c:xMode val="edge"/><c:yMode val="edge"/><c:x val="${legend.x.toFixed(4)}"/><c:y val="${legend.y.toFixed(4)}"/><c:w val="${legend.w.toFixed(4)}"/><c:h val="${legend.h.toFixed(4)}"/></c:manualLayout></c:layout><c:overlay val="0"/><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${legend.size}"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ro-RO"/></a:p></c:txPr></c:legend>`;
+    output = output.replace(/<c:legend>[\s\S]*?<\/c:legend>/u, "").replace(/<c:plotVisOnly\b/u, `${legendXml}<c:plotVisOnly`);
+  }
   if (minLabelSize) output = output.replace(/(<c:catAx>[\s\S]*?<\/c:catAx>)/u, (axis) => axis.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/u, (whole, head, size, tail) => `${head}${Math.max(Number(size), minLabelSize)}${tail}`));
   return output;
 }
@@ -1039,18 +1044,96 @@ function chartSpec(item) {
   return null;
 }
 // Rule 10: category labels stay ≥ 10 pt; they step down from the template size only as far as needed.
-function barLabelSize(rows, bandBox, layout, frame) {
-  const slotPoints = frame.cy * layout.h / EMU * 72 / Math.max(1, rows.length);
-  const labelPoints = frame.cx * layout.x / EMU * 72 - 6; // room left of the plot
-  const longest = Math.max(1, ...rows.map((row) => String(row.name).length));
-  const byHeight = slotPoints / 2.5; // two lines per participant
-  const byWidth = labelPoints * 2 / (longest * 0.55);
-  return Math.max(1000, Math.min(2400, Math.floor(Math.min(byHeight, byWidth)) * 100));
-}
 function columnLabelSize(rows) {
   const slotPoints = 17.2 * 72 / Math.max(1, rows.length) * 0.9;
   const longestWord = Math.max(1, ...rows.flatMap((row) => String(row.name).split(/\s+/u).map((word) => word.length)));
   return Math.max(1000, Math.min(2000, Math.floor(slotPoints / (longestWord * 0.6)) * 100));
+}
+
+
+// ---------------------------------------------------------------- chart text fit (F21/F22)
+const PT = EMU / 72;
+const FOOTER_TOP = 10.45 * EMU; // the TREND footer mark starts below this line on every content slide
+function wrappedLines(value, size, width) {
+  const charWidth = size * 0.5; let lines = 1; let line = 0;
+  for (const word of String(value).split(/\s+/u).filter(Boolean)) { const w = word.length * charWidth; const gap = line ? charWidth : 0; if (line && line + gap + w > width) { lines += 1; line = w; } else line += gap + w; while (line > width) { lines += 1; line -= width; } }
+  return lines;
+}
+const axisLabelSize = (chartXml, axis) => Number(chartXml.match(new RegExp(`<c:${axis}>[\\s\\S]*?<a:defRPr\\b[^>]*\\bsz="(\\d+)"`, "u"))?.[1] || 1800);
+/** Largest label size (≤ template, ≥ 10 pt) at which every label wraps into its box. */
+function fitLabels(labels, { max, width, height, maxLines = 4 }) {
+  for (let size = max; size >= 1000; size -= 100) {
+    const points = size / 100;
+    if (labels.every((label) => { const lines = wrappedLines(label, points, width); return lines <= maxLines && lines * points * 1.2 <= height; })) return size;
+  }
+  return 1000;
+}
+const templateLayout = (chartXml) => { const match = chartXml.match(/<c:plotArea><c:layout><c:manualLayout>[\s\S]*?<c:x val="([^"]+)"\/><c:y val="([^"]+)"\/><c:w val="([^"]+)"\/><c:h val="([^"]+)"\/>/u); return match ? { x: Number(match[1]), y: Number(match[2]), w: Number(match[3]), h: Number(match[4]) } : null; };
+/**
+ * Pinned plot areas (F21): the plot area is chosen first (room for the labels, clear of the footer) and the band is
+ * placed from that plot area, so the band lands on the benchmark wherever the renderer draws the axis.
+ */
+function chartLayout(item, chartXml, slideXml, spec) {
+  const options = {}; let slide = null; const { low, high } = bandRange(item);
+  if (item.family === "range") {
+    const frame = xfrmOf(getShape(slideXml, 22)); const band = visualBox(getShape(slideXml, 2));
+    const perPoint = band.cy / (high - low); const top = band.y - (5 - high) * perPoint; // y(5) from the template rectangle
+    const left = band.x; const width = band.cx; const slot = width / Math.max(1, spec.data.categories.length) / PT * 0.92;
+    const size = fitLabels(spec.data.categories, { max: Math.min(2000, axisLabelSize(chartXml, "catAx")), width: slot, height: 4 * 20 * 1.2, maxLines: 4 });
+    const lines = Math.max(...spec.data.categories.map((label) => wrappedLines(label, size / 100, slot)));
+    const bottom = Math.min(top + 4 * perPoint, FOOTER_TOP - (lines * size / 100 * 1.25 + 10) * PT);
+    options.plotLayout = { x: (left - frame.x) / frame.cx, y: (top - frame.y) / frame.cy, w: width / frame.cx, h: (bottom - top) / frame.cy };
+    options.labelSize = size;
+    slide = updateShape(slideXml, 2, (shape) => setVisualBox(shape, { ...visualBox(shape), y: top + (5 - high) / 4 * (bottom - top), cy: (high - low) / 4 * (bottom - top) }));
+  }
+  if (item.family === "participant-mean") {
+    const frame = xfrmOf(getShape(slideXml, 2)); const band = visualBox(getShape(slideXml, 3));
+    const perPoint = band.cx / (high - low); const right = band.x + (5 - low) * perPoint; // x(5) from the template rectangle
+    const top = frame.y + 0.07 * frame.cy; const height = 0.9 * frame.cy; const slot = height / Math.max(1, item.rows.length) / PT;
+    const size = Math.max(1000, Math.min(axisLabelSize(chartXml, "catAx"), Math.floor(slot / 2.6) * 100));
+    // A name wraps only at spaces: the label column must hold its longest word, and half of the name at most.
+    const needed = Math.max(...item.rows.map((row) => { const name = String(row.name); return Math.max(...name.split(/\s+/u).map((word) => word.length), Math.ceil(name.length / 2)); }));
+    const labelWidth = (needed * size / 100 * 0.6 + 24) * PT;
+    const left = Math.max(right - 4 * perPoint, frame.x + labelWidth);
+    options.plotLayout = { x: (left - frame.x) / frame.cx, y: 0.07, w: (Math.min(right, frame.x + frame.cx * 0.99) - left) / frame.cx, h: 0.9 };
+    const plotRight = left + options.plotLayout.w * frame.cx; const scale = (plotRight - left) / 4;
+    options.labelSize = size; options.dataLabelSize = Math.max(1000, Math.min(2400, Math.round(size * 1.2 / 100) * 100));
+    slide = updateShape(slideXml, 3, (shape) => setVisualBox(shape, { ...visualBox(shape), x: left + (low - 1) * scale, cx: (high - low) * scale, y: top, cy: height }));
+  }
+  if (item.family === "ranking") {
+    const frame = xfrmOf(getShape(slideXml, 6)); const layout = templateLayout(chartXml) || { x: 0.02, y: 0.17, w: 0.96, h: 0.81 };
+    const plotW = layout.w * frame.cx / PT; const plotH = layout.h * frame.cy / PT; const count = spec.data.series.length;
+    const thickness = plotH / (count + 2.19);
+    const labels = spec.data.series.map((series) => ({ text: `${series.name}; ${f2(series.values[0])}`, room: Math.max(60, (Number(series.values[0]) - 1) / 4 * plotW) }));
+    let size = Math.min(2400, axisLabelSize(chartXml, "dLbls") || 2000);
+    while (size > 1000 && !labels.every((label) => wrappedLines(label.text, size / 100, label.room * 0.9) * size / 100 * 1.2 <= thickness * 0.95)) size -= 100;
+    options.dataLabelSize = size;
+    // F22: when „competency; mean” cannot sit inside the bars at ≥ 10 pt, the labels carry the value only and the
+    // competencies move to a legend under the plot (the band shrinks with the plot's height).
+    // Renderers wrap a data label at roughly a fifth of the chart width; a label wider than that would wrap over its neighbours.
+    const wrapWidth = frame.cx / PT / 5;
+    if (!labels.every((label) => wrappedLines(label.text, size / 100, Math.min(label.room * 0.9, wrapWidth)) * size / 100 * 1.2 <= thickness * 0.95)) {
+      const legendHeight = 0.14;
+      options.valueOnlyLabels = true;
+      options.legend = { x: layout.x, y: layout.y + layout.h - legendHeight + 0.02, w: layout.w, h: legendHeight, size: 1400 };
+      options.plotLayout = { ...layout, h: layout.h - legendHeight };
+      options.dataLabelSize = Math.min(2400, axisLabelSize(chartXml, "dLbls") || 2000);
+      const plotTop = frame.y + layout.y * frame.cy; const plotHeight = options.plotLayout.h * frame.cy;
+      slide = updateShape(slideXml, 2, (shape) => setVisualBox(shape, { ...visualBox(shape), y: plotTop, cy: plotHeight }));
+    }
+  }
+  if (item.family === "population") {
+    const frame = xfrmOf(getShape(slideXml, 6)); const layout = templateLayout(chartXml) || { x: 0.126, y: 0, w: 0.856, h: 0.96 };
+    const width = layout.x * frame.cx / PT - 12; const slot = layout.h * frame.cy / PT / Math.max(1, spec.data.categories.length);
+    options.labelSize = fitLabels(spec.data.categories, { max: axisLabelSize(chartXml, "catAx"), width, height: slot * 0.9, maxLines: 6 });
+  }
+  if (item.family === "zone") {
+    const frame = xfrmOf(getShape(slideXml, 6)); const layout = templateLayout(chartXml) || { x: 0.04, y: 0.02, w: 0.96, h: 0.78 };
+    const plotBottom = frame.y + (layout.y + layout.h) * frame.cy; const room = (FOOTER_TOP - plotBottom) / PT - 8;
+    const slot = layout.w * frame.cx / PT / Math.max(1, spec.data.categories.length) * 0.92;
+    options.labelSize = fitLabels(spec.data.categories, { max: axisLabelSize(chartXml, "catAx"), width: slot, height: room, maxLines: 4 });
+  }
+  return { options, slide };
 }
 
 // ---------------------------------------------------------------- slide fillers (fill map §1)
@@ -1329,20 +1412,12 @@ async function updateCharts(zip, plan) {
     for (const rel of charts) {
       const chartPath = relationshipTarget(slideName(index + 1), rel.Target);
       const options = { ...spec.options };
-      if (item.family === "range") {
-        // chart1 (box plot) also has an automatic plot area: pin it to the band's 1–5 mapping (rule 4).
-        const slide = await zip.file(slideName(index + 1)).async("string");
-        const band = visualBox(getShape(slide, 2)); const frame = xfrmOf(getShape(slide, 22));
-        options.plotLayout = plotLayoutFromBand(getShape(slide, 2), getShape(slide, 22), { ...bandRange(item), axis: "y", cross: [(band.x - frame.x) / frame.cx, band.cx / frame.cx] });
-      }
-      if (item.family === "participant-mean") {
-        // chart2 has an automatic plot area; pin it to the band's own 1–5 mapping so long names cannot shift it (rule 4).
-        const slide = await zip.file(slideName(index + 1)).async("string");
-        options.plotLayout = plotLayoutFromBand(getShape(slide, 3), getShape(slide, 2), { ...bandRange(item), axis: "x", cross: [0.07, 0.9] });
-        options.labelSize = barLabelSize(item.rows, xfrmOf(getShape(slide, 3)), options.plotLayout, xfrmOf(getShape(slide, 2)));
-        options.dataLabelSize = Math.max(1000, Math.min(2400, Math.round(options.labelSize * 1.2 / 100) * 100));
-      }
-      zip.file(chartPath, normalizeChartIdentity(fillChartXml(await zip.file(chartPath).async("string"), spec.data, options), Number(chartPath.match(/chart(\d+)\.xml$/u)[1])));
+      const chartSource = await zip.file(chartPath).async("string");
+      const slideXml = await zip.file(slideName(index + 1)).async("string");
+      const layoutFix = chartLayout(item, chartSource, slideXml, spec);
+      Object.assign(options, layoutFix.options);
+      if (layoutFix.slide) zip.file(slideName(index + 1), layoutFix.slide);
+      zip.file(chartPath, normalizeChartIdentity(fillChartXml(chartSource, spec.data, options), Number(chartPath.match(/chart(\d+)\.xml$/u)[1])));
       const chartRelsPath = `${chartPath.split("/").slice(0, -1).join("/")}/_rels/${chartPath.split("/").at(-1)}.rels`;
       const workbookRel = relationshipTargets(await zip.file(chartRelsPath).async("string")).find((entry) => entry.Type === `${relsType}package`);
       if (!workbookRel) throw new Error(`Chart ${chartPath} has no embedded workbook.`);

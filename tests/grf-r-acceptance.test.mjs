@@ -184,3 +184,59 @@ test("DoD 12 split bundle items equal the generated deck items one for one", asy
   const artifacts = await buildBundleArtifacts(XLSX, payload);
   assert.deepEqual(artifacts.manifest.items.map((item) => [item.title, item.group]), plan.map((item) => [item.title, item.groupKey || "whole-project"]));
 });
+
+const MEASURE_BAND = `import json,sys
+from PIL import Image
+a=json.loads(sys.argv[1]); im=Image.open(a['png']).convert('RGB'); W,H=im.size; d=a['dpi']
+fx,fy,fw,fh=a['frame']; lx,ly,lw,lh=a['layout']
+left=(fx+lx*fw)*d; top=(fy+ly*fh)*d; width=lw*fw*d; height=lh*fh*d
+g=lambda p,lo,hi: abs(p[0]-p[1])<6 and abs(p[1]-p[2])<6 and lo<=p[0]<=hi
+if a['axis']=='y':
+  c=int(left+width*0.05); pix=[(y,im.getpixel((c,y))) for y in range(int(top-20),min(H,int(top+height+20)))]
+else:
+  c=int(top+height/a['slots']); pix=[(x,im.getpixel((x,c))) for x in range(max(0,int(left-20)),min(W,int(left+width+20)))]
+runs=[]
+for pos,p in pix:
+  if g(p,100,238):
+    if runs and pos-runs[-1][1]<=1 and abs(runs[-1][2]-p[0])<12: runs[-1][1]=pos
+    else: runs.append([pos,pos,p[0]])
+thin=[r for r in runs if r[1]-r[0]<=3]; wide=[r for r in runs if r[1]-r[0]>=8]
+centers=[(r[0]+r[1])/2 for r in thin]
+band=[pos for r in wide for pos in (r[0],r[1])]
+steps=sorted(b-a for a,b in zip(centers,centers[1:])); step=steps[len(steps)//2]
+first=centers[0] if a['axis']=='y' else centers[0]
+if a['axis']=='y': value=lambda pos: 5-(pos-first)/step*a['unit']
+else: value=lambda pos: 1+(pos-first)/step*a['unit']
+lo,hi=(value(max(band)+0.5),value(min(band)-0.5)) if a['axis']=='y' else (value(min(band)-0.5),value(max(band)+0.5))
+print(json.dumps({'low':lo,'high':hi,'gridlines':len(centers)}))`;
+
+test("F21: on the pinned charts (M7 box plot, A2) the rendered band lands on the benchmark (default and 3.00–3.75)", async (t) => {
+  const soffice = await tool("soffice"); const pdftoppm = await tool("pdftoppm");
+  if (!soffice || !pdftoppm || !(await binaryCommandAvailable("python3"))) { t.skip("LibreOffice, Poppler or Python is unavailable (set GRF_SOFFICE / GRF_PDFTOPPM)"); return; }
+  const { createFixture: inspectorFixture } = await import("./fixtures/grf-r-insp4-fixture.mjs");
+  const source = inspectorFixture(XLSX);
+  const temp = await mkdtemp(join(tmpdir(), "grf-r-band-"));
+  try {
+    for (const [low, high] of [[2.75, 3.5], [3, 3.75]]) {
+      const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: source.summary }, { name: "detail.xlsx", bytes: source.detailed }], { ...source.metadata, splitGroups: false, benchmarkLow: String(low), benchmarkHigh: String(high) }, {}, { acknowledgedWarningIds: [] });
+      const plan = reportPlan(payload); const generated = await generatedDeck(payload);
+      const deckPath = join(temp, `band-${low}.pptx`); await writeFile(deckPath, generated.bytes);
+      await run(soffice, ["--headless", "--convert-to", "pdf", "--outdir", temp, deckPath], { timeout: 300000 });
+      for (const [family, frameId, axis, unit] of [["range", 22, "y", 0.5], ["participant-mean", 2, "x", 0.5]]) {
+        const index = plan.findIndex((item) => item.family === family);
+        const slide = await generated.zip.file(`ppt/slides/slide${index + 1}.xml`).async("string");
+        const frameShape = slide.slice(slide.lastIndexOf("<p:graphicFrame", slide.indexOf(`<p:cNvPr id="${frameId}"`)));
+        const xfrm = frameShape.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/u).slice(1).map((value) => Number(value) / 914400);
+        const rel = (await generated.zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`).async("string")).match(/Target="\.\.\/charts\/(chart\d+\.xml)"/u)[1];
+        const chart = await generated.zip.file(`ppt/charts/${rel}`).async("string");
+        const layout = ["x", "y", "w", "h"].map((name) => Number(chart.match(new RegExp(`<c:plotArea><c:layout><c:manualLayout>[\\s\\S]*?<c:${name} val="([^"]+)"`, "u"))[1]));
+        const png = join(temp, `${family}-${low}`);
+        await run(pdftoppm, ["-png", "-r", "100", "-f", String(index + 1), "-l", String(index + 1), join(temp, `band-${low}.pdf`), png]);
+        const file = (await readdir(temp)).find((name) => name.startsWith(`${family}-${low}`) && name.endsWith(".png"));
+        const { stdout } = await run("python3", ["-c", MEASURE_BAND, JSON.stringify({ png: join(temp, file), axis, frame: xfrm, layout, dpi: 100, unit, slots: plan[index].rows?.length || 1 })]);
+        const measured = JSON.parse(stdout);
+        assert(Math.abs(measured.low - low) < 0.04 && Math.abs(measured.high - high) < 0.04, `${family} band renders at ${measured.low.toFixed(2)}–${measured.high.toFixed(2)}, expected ${low}–${high}`);
+      }
+    }
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});

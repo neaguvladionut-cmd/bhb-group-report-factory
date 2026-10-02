@@ -320,7 +320,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, fixedAxis = false, plotLayout = null } = {}) {
+export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -354,6 +354,11 @@ export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], c
   if (labelSize) output = output.replace(/(<c:catAx>[\s\S]*?<\/c:catAx>)/u, (axis) => axis.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/u, (whole, head, size, tail) => `${head}${Math.min(Number(size), labelSize)}${tail}`));
   if (dataLabelSize) output = output.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/gu, (labels) => labels.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/gu, (whole, head, size, tail) => `${head}${Math.min(Number(size), dataLabelSize)}${tail}`));
   if (plotLayout) output = setPlotLayout(output, plotLayout);
+  if (valueOnlyLabels) output = output.replace(/<c:showSerName val="1"\/>/gu, '<c:showSerName val="0"/>').replace(/<c:showVal val="0"\/>/gu, '<c:showVal val="1"/>').replace(/<c:separator>[^<]*<\/c:separator>/gu, "");
+  if (legend) {
+    const legendXml = `<c:legend><c:legendPos val="b"/><c:layout><c:manualLayout><c:xMode val="edge"/><c:yMode val="edge"/><c:x val="${legend.x.toFixed(4)}"/><c:y val="${legend.y.toFixed(4)}"/><c:w val="${legend.w.toFixed(4)}"/><c:h val="${legend.h.toFixed(4)}"/></c:manualLayout></c:layout><c:overlay val="0"/><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${legend.size}"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ro-RO"/></a:p></c:txPr></c:legend>`;
+    output = output.replace(/<c:legend>[\s\S]*?<\/c:legend>/u, "").replace(/<c:plotVisOnly\b/u, `${legendXml}<c:plotVisOnly`);
+  }
   if (minLabelSize) output = output.replace(/(<c:catAx>[\s\S]*?<\/c:catAx>)/u, (axis) => axis.replace(/(<a:defRPr\b[^>]*\bsz=")(\d+)(")/u, (whole, head, size, tail) => `${head}${Math.max(Number(size), minLabelSize)}${tail}`));
   return output;
 }
