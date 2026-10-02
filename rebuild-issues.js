@@ -70,6 +70,8 @@ export function renderIssueGroup(group, { documentRef = document, payload = null
   const search = article.querySelector("[data-issue-search]");
   let expanded = false;
   let showAll = false;
+  let page = 0;
+  const pageSize = 25;
 
   const drawRows = () => {
     const filtered = rows.filter((row) => rowMatches(row, search?.value || ""));
@@ -79,14 +81,14 @@ export function renderIssueGroup(group, { documentRef = document, payload = null
       list.replaceChildren();
       list.hidden = true;
     } else {
-      const visible = showAll ? filtered : filtered.slice(0, rowLimit);
+      const visible = showAll ? filtered.slice(page * pageSize, (page + 1) * pageSize) : filtered.slice(0, rowLimit);
       list.hidden = false;
       list.innerHTML = visible.length ? visible.map(rowMarkup).join("") : `<p class="empty-value">Nu există rânduri pentru această căutare.</p>`;
     }
     const canReveal = expanded && filtered.length > rowLimit;
     if (reveal) {
       reveal.hidden = !canReveal;
-      reveal.textContent = showAll ? "Arată mai puține" : `Arată toate (${filtered.length})`;
+      reveal.textContent = showAll ? (page + 1) * pageSize < filtered.length ? `Arată următoarele 25 (${Math.min(filtered.length, (page + 2) * pageSize)} din ${filtered.length})` : "Arată mai puține" : `Arată toate (${filtered.length})`;
     }
   };
 
@@ -99,11 +101,11 @@ export function renderIssueGroup(group, { documentRef = document, payload = null
     drawRows();
   });
   reveal?.addEventListener("click", () => {
-    showAll = !showAll;
+    if (!showAll) { showAll = true; page = 0; } else if ((page + 1) * pageSize < rows.length) page += 1; else { showAll = false; page = 0; }
     drawRows();
   });
   search?.addEventListener("input", () => {
-    showAll = false;
+    showAll = false; page = 0;
     drawRows();
   });
   article.querySelector("[data-confirm-group]")?.addEventListener("click", () => onConfirm({ group, title }));

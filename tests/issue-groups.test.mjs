@@ -97,10 +97,14 @@ test("issue search narrows the visible rows and count, then Arată toate reveals
   search.dispatchEvent({ type: "input" });
   const reveal = card.querySelector("[data-issue-reveal]");
   reveal.click();
-  assert.equal(card.querySelectorAll(".issue-item").length, 160);
-  assert.equal(reveal.textContent, "Arată mai puține");
+  assert.equal(card.querySelectorAll(".issue-item").length, 25);
+  assert.equal(reveal.textContent, "Arată următoarele 25 (50 din 160)");
 
   reveal.click();
+  assert.equal(card.querySelectorAll(".issue-item").length, 25);
+  assert.equal(reveal.textContent, "Arată următoarele 25 (75 din 160)");
+
+  for (let page = 0; page < 6; page += 1) reveal.click();
   assert.equal(card.querySelectorAll(".issue-item").length, 8);
   assert.equal(reveal.textContent, "Arată toate (160)");
 });

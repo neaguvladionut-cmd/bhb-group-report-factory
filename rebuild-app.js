@@ -99,9 +99,9 @@ function renderFound() {
     [payload.participantCounts?.included ?? 0, "participanți incluși"],
     [payload.competencies?.length ?? 0, "competențe"],
     [payload.behaviorAggregates?.length ?? 0, "comportamente"],
-    [method.evaluatorNames?.length || "Nu apare în export", "evaluatori distincti"],
-    [method.commonTeamSize || "Nu apare în export", "consultanți / participant"],
-    [periodLabel(), "perioada evaluării"]
+    [method.evaluatorNames?.length || "", "evaluatori distincti"],
+    [method.commonTeamSize || "", "consultanți / participant"],
+    [method.dates?.length || "", "zile de evaluare"]
   ];
   const statsNode = $("#findings-stats");
   if (statsNode) statsNode.innerHTML = stats.map(([value, label]) => `<div class="stat"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join("");
@@ -130,7 +130,7 @@ function renderReview() {
   const root = $("#issue-list"); if (!root || !payload) return;
   const blockers = payload.blockers || []; const pending = payload.warnings.filter((item) => !item.reviewed); const totalRows = (payload.schemas || []).reduce((sum, schema) => sum + Math.max(0, schema.rows.length - schema.headerRow), 0);
   const overview = $("#review-overview");
-  if (overview) overview.innerHTML = `<div class="review-state ${blockers.length || pending.length ? "needs-attention" : "all-clear"}"><strong>${blockers.length || pending.length ? "Mai este ceva de judecat" : "Totul este pregătit"}</strong><span>${blockers.length} blocaje · ${pending.length} avertismente · ${totalRows} rânduri citite</span></div><div class="review-stats"><div class="review-stat"><strong>${blockers.length}</strong><span>blocaje</span></div><div class="review-stat"><strong>${pending.length}</strong><span>avertismente de confirmat</span></div><div class="review-stat"><strong>${payload.participantCounts?.included ?? 0}</strong><span>participanți incluși</span></div><div class="review-stat"><strong>${payload.participantCounts?.excludedUnrated ?? 0}</strong><span>fără scor, excluși</span></div></div>`;
+  if (overview) overview.innerHTML = `<div class="review-state ${blockers.length || pending.length ? "needs-attention" : "all-clear"}"><strong>${blockers.length || pending.length ? "Mai este ceva de judecat" : "Totul este pregătit"}</strong><span>${blockers.length} blocaje · ${pending.length} avertismente · ${totalRows} rânduri citite</span></div><div class="review-stats"><div class="review-stat"><strong>${blockers.length}</strong><span>blocaje</span></div><div class="review-stat"><strong>${pending.length}</strong><span>avertismente de confirmat</span></div><div class="review-stat"><strong>${payload.participantCounts?.included ?? 0}</strong><span>participanți citiți</span></div><div class="review-stat"><strong>${payload.participantCounts?.excludedUnrated ?? 0}</strong><span>fără scor, excluși</span></div></div>`;
   root.replaceChildren();
   const onConfirm = ({ group, title }) => { group.items.forEach((item) => state.acknowledged.add(warningKey(item))); announce(`Avertismentul ${title} a fost confirmat.`); render(); $("#review-title")?.focus(); };
   groupedIssues(blockers, "blocker").forEach((group) => root.append(renderIssueGroup(group, { payload })));
@@ -144,25 +144,25 @@ function outlineLabel(slide) { const family = { cover: "Copertă", "how-to-read"
 function groupOutlineSlides(plan) { const groups = []; const keys = [...new Set(plan.map((slide) => slide.groupKey || ""))]; for (const key of keys) { const slides = plan.filter((slide) => (slide.groupKey || "") === key); if (!slides.length) continue; const main = slides.filter((slide) => slide.deliverable !== "appendix" && !["conclusions", "close"].includes(slide.family)); const annex = slides.filter((slide) => slide.deliverable === "appendix"); const ending = slides.filter((slide) => ["conclusions", "close"].includes(slide.family)); if (main.length) groups.push({ title: key ? `Raport principal · grup ${key}` : "Raport principal · întregul proiect", slides: main }); if (annex.length) groups.push({ title: key ? `Anexă · grup ${key}` : "Anexă", slides: annex }); if (ending.length) groups.push({ title: key ? `Concluzii · grup ${key}` : "Concluzii și recomandări", slides: ending }); } return groups; }
 function renderStructure() {
   const root = $("#structure-summary"); if (!root || !payload?.readiness) return;
-  const plan = reportPlan(payload, { scope: "whole" }); const groups = groupOutlineSlides(plan); const annex = payload.metadata.annex; const mainCount = plan.filter((slide) => slide.deliverable !== "appendix" && !["conclusions", "close"].includes(slide.family)).length; const appendixCount = plan.filter((slide) => slide.deliverable === "appendix").length; const endCount = plan.filter((slide) => ["conclusions", "close"].includes(slide.family)).length;
+  const plan = reportPlan(payload, { scope: "whole" }); const groups = groupOutlineSlides(plan); const annex = payload.metadata.annex; const mainPlan = reportPlan(payload, { scope: "main" }); const appendixPlan = annex === "separate" ? reportPlan(payload, { scope: "appendix" }) : []; const deliveredTotal = annex === "separate" ? mainPlan.length + appendixPlan.length : plan.length; const mainCount = mainPlan.filter((slide) => slide.deliverable !== "appendix" && !["conclusions", "close"].includes(slide.family)).length; const appendixCount = annex === "separate" ? appendixPlan.length : plan.filter((slide) => slide.deliverable === "appendix").length; const endCount = mainPlan.filter((slide) => ["conclusions", "close"].includes(slide.family)).length;
   const slideLabel = (count) => `${count} ${count === 1 ? "slide" : "slide-uri"}`;
-  $("#slide-total") && ($("#slide-total").textContent = slideLabel(plan.length));
+  $("#slide-total") && ($("#slide-total").textContent = slideLabel(deliveredTotal));
   root.parentElement.querySelectorAll(".structure-summary-note").forEach((node) => node.remove());
   root.innerHTML = groups.map((group) => `<section class="outline-group"><h4>${esc(group.title)}<small>${slideLabel(group.slides.length)}</small></h4><span class="outline-count">${group.slides.length}</span><div class="outline-items">${group.slides.slice(0, 9).map((slide) => `<div class="outline-item"><span>${esc(outlineLabel(slide))}</span><span>${slide.number}</span></div>`).join("")}${group.slides.length > 9 ? `<div class="outline-item"><span>și alte secțiuni</span><span>${group.slides.length - 9}</span></div>` : ""}</div></section>`).join("");
-  root.insertAdjacentHTML("beforebegin", `<p class="field-where structure-summary-note">${slideLabel(plan.length)}: ${mainCount} principal · ${appendixCount} anexă · ${endCount} concluzii și încheiere. ${annex === "separate" ? "Anexa se descarcă separat, cu ambele nume reale afișate." : annex === "none" ? "Fără anexă: rezultatele individuale, analiza observațiilor și comportamentele cheie nu apar în livrare." : "Anexa rămâne înaintea concluziilor în raportul principal."}</p>`);
+  root.insertAdjacentHTML("beforebegin", `<p class="field-where structure-summary-note">${slideLabel(deliveredTotal)} în livrare: ${mainCount} principal · ${appendixCount} anexă · ${endCount} concluzii și încheiere. ${annex === "separate" ? "Anexa se descarcă separat, cu ambele nume reale afișate." : annex === "none" ? "Fără anexă: rezultatele individuale, analiza observațiilor și comportamentele cheie nu apar în livrare." : "Anexa rămâne înaintea concluziilor în raportul principal."}</p>`);
 }
 
 function codeGroupSummary() {
   const groups = (payload?.groups || []).map((group) => `${group.name || group.code} · ${group.records?.length ?? 0}`);
   if (payload?.codeReadiness?.blank) groups.push(`fără grup · ${payload.codeReadiness.blank}`);
-  return groups.length ? `Grupuri disponibile: ${groups.join(" · ")}.` : "Nu există grupuri CODE în export.";
+  return groups.length ? `Grupuri disponibile: ${groups.join(" · ")}.` : "Nu există grupuri în export.";
 }
 function setReason(input, reason) { const label = input?.closest("label"); if (!label) return; let node = label.querySelector(".control-reason"); if (!reason) { node?.remove(); return; } if (!node) { node = document.createElement("small"); node.className = "control-reason"; label.append(node); } node.textContent = reason; input.setAttribute("aria-describedby", "split-help"); }
 function guardControls() {
   if (!payload) return;
-  const split = $("#split-groups"); if (split) { const unavailable = !payload.codeReadiness?.splitAvailable; split.disabled = unavailable; if (unavailable) split.checked = false; const reason = unavailable ? "Împărțirea este indisponibilă: sunt necesare cel puțin două grupuri CODE." : ""; $("#split-help") && ($("#split-help").textContent = `${codeGroupSummary()} ${reason || "Dezactivat implicit. Participanții fără grup rămân numai în vederea întregului proiect."}`); setReason(split, reason); }
+  const split = $("#split-groups"); if (split) { const unavailable = !payload.codeReadiness?.splitAvailable; split.disabled = unavailable; if (unavailable) split.checked = false; const reason = unavailable ? "Împărțirea este indisponibilă: sunt necesare cel puțin două grupuri." : ""; $("#split-help") && ($("#split-help").textContent = `${codeGroupSummary()} ${reason || "Dezactivat implicit. Participanții fără grup rămân numai în vederea întregului proiect."}`); setReason(split, reason); }
   const previewButton = $("#preview-trigger"); if (previewButton) previewButton.disabled = !payload.readiness;
-  const separate = payload.metadata.annex === "separate"; $("#pptx-whole") && ($("#pptx-whole").hidden = separate); $("#pptx-main") && ($("#pptx-main").hidden = !separate); $("#pptx-appendix") && ($("#pptx-appendix").hidden = !separate);
+  const separate = payload.metadata.annex === "separate"; const names = expectedNames("whole"); $("#pptx-whole") && ($("#pptx-whole").hidden = separate, $("#pptx-whole").textContent = `Descarcă ${names.whole}`); $("#pptx-main") && ($("#pptx-main").hidden = !separate, $("#pptx-main").textContent = `Descarcă ${names.main}`); $("#pptx-appendix") && ($("#pptx-appendix").hidden = !separate, $("#pptx-appendix").textContent = `Descarcă ${names.appendix}`); const annexNames = $("#annex-file-names"); if (annexNames) annexNames.textContent = `Descarcă ${names.main} și ${names.appendix}.`;
 }
 
 function sync() {
@@ -177,11 +177,11 @@ function sync() {
   $("#to-step-4") && ($("#to-step-4").disabled = !ready(3));
   const enabled = ready(3) && !state.busy; ["#xlsx", "#csv-template", "#bundle", "#pptx-whole", "#pptx-main", "#pptx-appendix"].forEach((selector) => { const button = $(selector); if (button) button.disabled = !enabled; });
   guardControls();
-  const chooseNote = $("#choose-note"); if (chooseNote) chooseNote.textContent = payload?.metadata?.annex === "none" ? "Fără anexă a fost aleasă; rezultatele individuale și analiza observațiilor dispar din livrare." : `${reportPlan && payload?.readiness ? reportPlan(payload, { scope: "whole" }).length : "—"} slide-uri după alegerile curente.`;
+  const chooseNote = $("#choose-note"); if (chooseNote) { const count = reportPlan && payload?.readiness ? reportPlan(payload, { scope: "whole" }).length : null; chooseNote.textContent = payload?.metadata?.annex === "none" ? "Fără anexă a fost aleasă; rezultatele individuale și analiza observațiilor dispar din livrare." : `${count === null ? "—" : count} ${count === 1 ? "slide" : "slide-uri"} după alegerile curente.`; }
 }
 
 function renderDownload() { const time = $("#receipt-time"); const receipt = $("#receipt"); if (time) time.textContent = state.receipts.length ? state.receipts.at(-1).time : "Încă nu ai descărcat un fișier"; if (receipt) receipt.innerHTML = state.receipts.length ? state.receipts.map((item) => `<div class="receipt-entry"><strong>${esc(item.name)}</strong><span>${esc(item.kind)} · ${esc(item.detail)} · ${esc(item.time)}</span></div>`).join("") : "<p>După prima descărcare vei vedea aici numele exact, tipul livrării și numărul de slide-uri.</p>"; }
-function addReceipt(name, kind, detail) { const time = new Intl.DateTimeFormat("ro-RO", { dateStyle: "short", timeStyle: "short" }).format(new Date()); state.receipts.push({ name, kind, detail, time }); renderDownload(); announce(`${name} a fost pregătit pentru descărcare.`); }
+function addReceipt(name, kind, detail) { const time = new Intl.DateTimeFormat("ro-RO", { dateStyle: "short", timeStyle: "short" }).format(new Date()); const normalizedDetail = detail.replace(/(\d+) slide-uri?/u, (_, count) => `${count} ${count === "1" ? "slide" : "slide-uri"}`); state.receipts.push({ name, kind, detail: normalizedDetail, time }); renderDownload(); announce(`${name} a fost pregătit pentru descărcare.`); }
 
 function render() {
   const current = metadata(); if (files.length && !state.projectName) state.projectName = current.projectName || deriveProjectName(); if (!state.reportDate) state.reportDate = current.reportDate || today();
