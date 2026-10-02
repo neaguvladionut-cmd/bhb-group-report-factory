@@ -140,7 +140,7 @@ test("M5 key findings: table rows per scored participant, braces span their band
     assert.equal(text(getShape(xml, 19)), "Abilități cheie – Puncte forte");
     assert.equal(text(getShape(xml, 20)), "Arii de dezvoltare");
     const strengths = text(getShape(xml, 17)).split("\n").filter(Boolean); assert.equal(strengths.length, item.insight.key.length);
-    strengths.forEach((line) => assert.match(line, / \(\d+%\)$/u));
+    strengths.forEach((line) => assert.doesNotMatch(line, /%/u));
     assert.match(xml, new RegExp(`GRF-R new:subtitle[\\s\\S]*?medie ${f2(item.mean)} · mediană ${f2(item.median)}`, "u"));
   }
 });
@@ -265,22 +265,6 @@ test("bundle (F15): one cropped item per chart and table, values equal to the de
   }
 });
 
-test("E: a key-finding share equals a hand count from the raw fixture rows", () => {
-  const { detailed } = acceptanceRows();
-  const column = 5; // first behaviour of the first competency (Leadership …)
-  const scores = detailed.slice(3).map((row) => row[column]).filter((value) => value !== "");
-  const expected = Math.round(scores.filter((value) => value === 2).length / scores.length * 100);
-  const index = whole.plan.findIndex((item) => item.family === "key-findings" && item.competency === detailed[0][column]);
-  const behaviour = detailed[2][column];
-  const lines = text(getShape(whole.slides[index], 17)).split("\n").concat(text(getShape(whole.slides[index], 18)).split("\n"));
-  const line = lines.find((entry) => entry.includes(behaviour));
-  assert(line, "the behaviour is ranked into a key-findings list");
-  const share = /Să exersezi/u.test(line) ? Math.round(scores.filter((value) => value === 0).length / scores.length * 100) : expected;
-  assert(line.endsWith(`(${share}%)`), `${line} ≠ (${share}%)`);
-  const shares = new Set(whole.slides.filter((_, slideIndex) => whole.plan[slideIndex].family === "key-findings").flatMap((xml) => text(getShape(xml, 17)).match(/\(\d+%\)/gu) || []));
-  assert(shares.size > 1, "shares differ between behaviours");
-});
-
 test("D: box plot keeps the template's median diamond and the varied fixture has a median strictly inside the range", async () => {
   const index = variedDeck.plan.findIndex((item) => item.family === "range");
   const item = variedDeck.plan[index];
@@ -362,7 +346,7 @@ test("F27: PNG/SVG items carry no caption; F29: app.xml counts the generated sli
   const paragraphs = off.find((item) => item.family === "how-to-read").paragraphs.join(" ");
   assert.doesNotMatch(paragraphs, /Graficele de distribuție|Abilitățile cheie|Procentele/u);
   const on = reportPlan(payloadOf(acceptance)).find((item) => item.family === "how-to-read").paragraphs.join(" ");
-  assert.match(on, /Graficele de distribuție/u); assert.match(on, /Procentele indică/u);
+  assert.match(on, /Graficele de distribuție/u); assert.doesNotMatch(on, /Procentele/u);
 });
 
 const { createFixture: insp5Fixture } = await import("./fixtures/grf-r-insp5-fixture.mjs");
@@ -526,3 +510,18 @@ test("t7 ladder: every participant's name sits beside their overall mean", () =>
   const sizes = rows.map((row) => Number((row.match(/<a:tc\b[\s\S]*?<\/a:tc>/u)[0].match(/\ssz="(\d+)"/u) || [0, 0])[1]));
   assert.equal(new Set(sizes).size, 1); assert(sizes[0] >= 900);
 });
+
+test("behaviour lines carry no percentages: plain declined text or the imported behaviour (deck and bundle)", async () => {
+  for (const generated of [whole, split, insp6Deck]) generated.plan.forEach((item, index) => {
+    if (item.family !== "key-findings" || item.noRanking) return;
+    const lines = [17, 18].flatMap((id) => text(getShape(generated.slides[index], id)).split("\n")).filter(Boolean);
+    assert(lines.length > 0);
+    lines.forEach((line) => assert.doesNotMatch(line, /\(\s*\d+\s*%\s*\)|%$/u, line));
+    const known = new Set((item.insight.key || []).map((row) => row.score2 || row.behavior).concat((item.insight.development || []).map((row) => row.score0 || row.behavior)));
+    lines.forEach((line) => assert(known.has(line), `„${line}” is the declined text or the behaviour`));
+  });
+  const artifacts = await buildBundleArtifacts(XLSX, insp6Payload);
+  for (const layout of artifacts.layouts) for (const entry of layout.texts) assert.doesNotMatch(entry.line, /\(\s*\d+\s*%\s*\)/u);
+  assert.doesNotMatch(whole.plan.find((item) => item.family === "how-to-read").paragraphs.join(" "), /Procentele/u);
+});
+

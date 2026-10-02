@@ -114,7 +114,7 @@ export function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end", famil
   const opening = "Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim.";
   const bandText = has("range", "ranking", "zone", "participant-mean", "participant-comparison", "competency-participants") ? ` Banda gri din grafice marchează intervalul de referință (benchmark) de ${range(low, high)}, care corespunde unei performanțe la nivel mediu în evaluările TREND: rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie.` : "";
   const second = [has("key-findings", "range", "ranking", "benchmark", "participant-mean") ? "Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme." : "", has("range") ? "Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților." : ""].filter(Boolean).join(" ");
-  const third = has("key-findings", "behavior") ? ["Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate.", has("key-findings") ? "Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat." : ""].filter(Boolean).join(" ") : "";
+  const third = has("key-findings", "behavior") ? "Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate." : "";
   const last = annex === "none" ? "Rezultatele descriu grupul evaluat." : `Rezultatele descriu grupul evaluat. Rezultatele individuale se regăsesc ${annex === "separate" ? "în anexa transmisă separat" : "în anexă"}.`;
   return [`${opening}${bandText}`, second, third, last].filter(Boolean);
 }
@@ -186,7 +186,8 @@ export function executiveSummary(payload) {
   };
 }
 
-const behaviourLine = (row, field, share) => `${text(row[field]) || row.behavior} (${Math.round((share || 0) * 100)}%)`;
+// Vlad 2026-10-02: no percentages after the behaviours — the declined text or the behaviour only.
+const behaviourLine = (row, field) => text(row[field]) || row.behavior;
 export function competencyFindings(payload) {
   const insights = new Map(behaviorInsights(payload.behaviorAggregates || []).map((item) => [item.competency, item]));
   const { low, high } = payload.bands;
