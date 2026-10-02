@@ -101,6 +101,27 @@ test("GRF-UX methodology derives real dates, teams, roles and location from deta
   assert.equal(cover.reportDate, "01.10.2026");
 });
 
+test("GRF-UX role counts exclude participants without included summary scores", () => {
+  const summaryWithUnrated = workbook([
+    ["CODE", "name", "cod cp", "Leadership"],
+    ["North", "Synthetic Ana", "A-1", 4],
+    ["South", "Synthetic Bogdan", "A-2", 3],
+    ["West", "Synthetic Cia", "A-3", ""]
+  ]);
+  const detailedWithRoles = workbook([
+    ["CODE", "name the person evaluated", "job", "regiune", "cod ac", "Competente", "Leadership"],
+    ["", "", "", "", "", "Subcompetente", "L"],
+    ["", "", "", "", "", "behavior", "Behavior one"],
+    ["North", "Synthetic Ana", "Manager", "Nord", "A-1", "", 2],
+    ["South", "Synthetic Bogdan", "Specialist", "Sud", "A-2", "", 1],
+    ["West", "Synthetic Cia", "Director", "Vest", "A-3", "", 0]
+  ]);
+  const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: summaryWithUnrated }, { name: "detail.xlsx", bytes: detailedWithRoles }], { projectName: "Roluri sintetice" });
+  assert.equal(payload.participantCounts.included, 2);
+  assert.deepEqual(payload.methodology.populationByRole, [{ role: "Manager", count: 1 }, { role: "Specialist", count: 1 }]);
+  assert.equal(payload.methodology.populationByRole.reduce((sum, item) => sum + item.count, 0), payload.participantCounts.included);
+});
+
 test("GRF-UX methodology accepts Excel serials and text dates with time, reduced to calendar days", () => {
   const serial = (year, month, day, fraction = 0) => (Date.UTC(year, month - 1, day) - Date.UTC(1899, 11, 30)) / 86400000 + fraction;
   const summaryRows = [["CODE", "name", "cod cp", "Leadership"], ["", "Synthetic Ana", "A-1", 3], ["", "Synthetic Bogdan", "A-2", 3], ["", "Synthetic Cia", "A-3", 3]];

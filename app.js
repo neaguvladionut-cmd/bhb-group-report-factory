@@ -373,6 +373,8 @@ function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState 
   const teamSizeCounts = new Map();
   for (const size of methodologySource.teamSizes || []) teamSizeCounts.set(size, (teamSizeCounts.get(size) || 0) + 1);
   const commonTeamSize = [...teamSizeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || null;
+  const includedRoleCounts = new Map();
+  for (const row of methodologySource.methodologyRows || []) if (includedIdentities.has(row.identity) && row.role && !/^x$/iu.test(row.role)) includedRoleCounts.set(row.role, (includedRoleCounts.get(row.role) || 0) + 1);
   const methodology = {
     evaluatorNames: methodologySource.evaluators || [],
     dates: methodologySource.dates || [],
@@ -380,7 +382,7 @@ function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState 
     teamSizes: methodologySource.teamSizes || [],
     commonTeamSize,
     locations: methodologySource.locations || [],
-    populationByRole: methodologySource.populationByRole || []
+    populationByRole: [...includedRoleCounts.entries()].map(([role, count]) => ({ role, count }))
   };
   const acknowledged = new Set(reviewState.acknowledgedWarningIds || []);
   const finalWarnings = warnings.map((item) => ({ ...item, reviewed: acknowledged.has(item.id) }));
