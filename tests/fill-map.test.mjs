@@ -476,7 +476,7 @@ test("F42: tied strongest/weakest competencies are all named; F44: a missing sco
   if (means.filter((mean) => mean === lowest).length > 1) assert.match(summary.competencyLines[1], / și .* \(\d\.\d\d\)$/u);
   assert.match(summary.competencyLines[1], new RegExp(`\\(${lowest.replace(".", "\\.")}\\)$`, "u"));
   const blank = insp6Payload.warnings.find((item) => item.code === "detailed-blank");
-  assert(blank && /^Scor lipsă: Participant Sintetic B\d\d – „/u.test(blank.message), blank?.message);
+  assert(blank && /Participant Sintetic B\d\d – „/u.test(blank.message), blank?.message);
 });
 
 test("F43: bundle file names keep group and page parts and stay unique", async () => {
@@ -554,4 +554,18 @@ test("F51: a score at the axis minimum keeps a visible value label on A2, A3 and
     });
   }
   assert(checked > 0, "the fixture has scores at 1.00 in the annex charts");
+});
+
+test("F50: missing detailed scores raise ONE grouped warning per source; F52: every part of the deck is reachable", async () => {
+  const blanks = insp7Payload.warnings.filter((item) => item.code === "detailed-blank");
+  assert.equal(blanks.length, 1);
+  assert.match(blanks[0].message, /^Scoruri lipsă în detail\.xlsx: \d+ \(participant – comportament\): /u);
+  if (blanks[0].count > 10) assert.match(blanks[0].message, new RegExp(`și încă ${blanks[0].count - 10}`, "u"));
+  for (const generated of [whole, split, insp7Deck]) {
+    const names = Object.keys(generated.zip.files).filter((name) => !name.endsWith("/"));
+    const rels = await Promise.all(names.filter((name) => name.endsWith(".rels")).map((name) => generated.zip.file(name).async("string")));
+    for (const media of names.filter((name) => name.startsWith("ppt/media/"))) assert(rels.some((xml) => xml.includes(media.split("/").at(-1))), `${media} is referenced`);
+    const { selfCheckPptx } = await import("../src/template-pptx.js");
+    await selfCheckPptx(generated.zip);
+  }
 });

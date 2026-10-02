@@ -167,6 +167,14 @@ function parseDetailed(schema, corrections = {}) {
     for (const blank of blanks) issues.splice(issues.indexOf(blank), 1);
     issue(issues, "warning", "detailed-all-blank", `Comportament fără niciun scor în export: „${column.behavior}” (${blanks.length} participanți fără scor). Este exclus din clasament; rămâne în șablonul CSV.`, undefined, { sourceName: schema.sourceName, field: column.behavior, competency: column.competency, behavior: column.behavior, id: `detailed-all-blank:${folded(column.competency)}:${folded(column.behavior)}` });
   }
+  // F50: the remaining single missing scores become ONE warning per source (count + participant–behaviour pairs).
+  const singles = issues.filter((item) => item.code === "detailed-blank");
+  if (singles.length) {
+    for (const single of singles) issues.splice(issues.indexOf(single), 1);
+    const pairs = singles.map((item) => item.message.replace(/^Scor lipsă: /u, ""));
+    const shown = pairs.slice(0, 10).join("; ");
+    issue(issues, "warning", "detailed-blank", `Scoruri lipsă în ${schema.sourceName}: ${singles.length} (participant – comportament): ${shown}${pairs.length > 10 ? ` și încă ${pairs.length - 10}` : ""}. Lipsurile nu se notează cu 0; restul scorurilor intră în calcul.`, undefined, { sourceName: schema.sourceName, count: singles.length, pairs, id: `detailed-blank:${folded(schema.sourceName)}` });
+  }
   const behaviorCatalog = columns.filter((column, index, all) => all.findIndex((candidate) => candidate.competency === column.competency && candidate.behavior === column.behavior) === index).map((column) => ({ competency: column.competency, subcompetency: column.subcompetency || "", behavior: column.behavior, behaviorRaw: column.behaviorRaw, sourceIndex: column.order }));
   return { records, behaviorRecords, behaviorCatalog, competencies: [...new Set(columns.map(({ competency }) => competency))], issues };
 }

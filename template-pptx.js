@@ -488,7 +488,7 @@ export async function selfCheckPptx(zip) {
   const overrides = contentTypes ? [...contentTypes.matchAll(/<Override\b[^>]*PartName="([^"]+)"/gu)].map((match) => match[1].replace(/^\//u, "")) : [];
   for (const part of overrides) if (!zip.file(part)) errors.push(`content type points to missing ${part}`);
   const graph = await packageGraph(zip); errors.push(...graph.dangling.map((part) => `relationship points to missing ${part}`));
-  for (const part of names.filter((name) => /^(ppt\/(slides|charts|embeddings)\/)/u.test(name))) if (!graph.reachable.has(part)) errors.push(`orphan package part ${part}`);
+  for (const part of names.filter((name) => name !== "[Content_Types].xml" && name !== "_rels/.rels")) if (!graph.reachable.has(part)) errors.push(`orphan package part ${part}`);
   const creationIds = new Set(); const shapeCreationIds = new Set();
   for (const entry of names) {
     if (/ppt\/fonts\//u.test(entry)) errors.push("ppt/fonts part present");
@@ -556,9 +556,11 @@ function updateContentTypes(xml, zip) {
   for (const name of Object.keys(zip.files)) { if (/^ppt\/slides\/slide\d+\.xml$/u.test(name)) overrides.push(`<Override PartName="/${name}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`); if (/^ppt\/charts\/chart\d+\.xml$/u.test(name)) overrides.push(`<Override PartName="/${name}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`); }
   return updated.replace("</Types>", `${overrides.join("")}</Types>`);
 }
+// F52: every part the deck does not reach from its root relationships (unused divider photos, theme overrides of
+// template charts that were not cloned, …) is removed; the self-check then requires parts = reachable.
 async function prunePackage(zip) {
-  const graph = await packageGraph(zip); for (const name of Object.keys(zip.files)) if (!name.endsWith("/") && name !== "[Content_Types].xml" && /^(ppt\/(slides|charts|embeddings)\/)/u.test(name) && !graph.reachable.has(name)) zip.remove(name);
-  for (const name of Object.keys(zip.files)) if (/^ppt\/(?:charts|theme)\/(?:style|colors|themeOverride)\d*(?:-chart\d+)?\.xml$/u.test(name) && !graph.reachable.has(name)) zip.remove(name);
+  const graph = await packageGraph(zip);
+  for (const name of Object.keys(zip.files)) if (!name.endsWith("/") && name !== "[Content_Types].xml" && name !== "_rels/.rels" && !graph.reachable.has(name)) zip.remove(name);
   zip.file("[Content_Types].xml", updateContentTypes(await zip.file("[Content_Types].xml").async("string"), zip));
 }
 // Sections are preserved: each generated slide joins its template slide's section; consecutive slides of one
