@@ -34,7 +34,7 @@ test("behaviour insights follow the fixed summed-score cuts", () => {
   const rows = Array.from({ length: 6 }, (_, index) => ({ competency: "Leadership", behavior: `B${index + 1}`, sum: 6 - index, sourceIndex: index }));
   const insight = behaviorInsights(rows)[0];
   assert.deepEqual(insight.key.map((row) => row.behavior), ["B1", "B2", "B3"]);
-  assert.deepEqual(insight.development.map((row) => row.behavior), ["B4", "B5", "B6"]);
+  assert.deepEqual(insight.development.map((row) => row.behavior), ["B6", "B5", "B4"], "the bottom list starts with the lowest");
   assert.equal(rankBehaviors(rows)[0].median, null);
 });
 

@@ -46,7 +46,7 @@ test("behaviour ranking uses present-score sums, fixed cuts and import-order tie
   const rows = Array.from({ length: 10 }, (_, index) => ({ competency: "Leadership", behavior: `B${index + 1}`, sum: index < 5 ? 4 : 1, sourceIndex: index }));
   const ranking = rankBehaviors(rows)[0];
   assert.deepEqual(ranking.key.map((row) => row.behavior), ["B1", "B2", "B3", "B4", "B5"]);
-  assert.deepEqual(ranking.development.map((row) => row.behavior), ["B6", "B7", "B8", "B9", "B10"]);
+  assert.deepEqual(ranking.development.map((row) => row.behavior), ["B6", "B7", "B8", "B9", "B10"], "equal means and shares fall back to column order");
   assert.equal(ranking.median, null);
 });
 
@@ -95,4 +95,33 @@ test("participants without CODE raise one grouped warning, not one per participa
   assert.match(codeWarnings[0].message, /^10 participanți nu au CODE/u);
   assert.match(codeWarnings[0].message, /și încă 2/u);
   assert.equal(codeWarnings[0].identities.length, 10);
+});
+
+test("R5 by mean (Vlad 2026-10-02): complete data keeps the sum order; missing scores rank by mean; spread then column order break ties", async () => {
+  const { topOrder } = await import("../src/rebuild-report-plan.js");
+  const row = (behavior, scores, sourceIndex) => { const present = scores.filter((value) => value !== null); return { competency: "C", behavior, sourceIndex, n: present.length, sum: present.reduce((a, b) => a + b, 0), mean: present.reduce((a, b) => a + b, 0) / present.length, pct2: present.filter((v) => v === 2).length / present.length, pct0: present.filter((v) => v === 0).length / present.length }; };
+  // Complete data, no ties: mean order equals the old sum order.
+  const complete = [row("A", [2, 2, 1, 1], 0), row("B", [2, 1, 1, 0], 1), row("C", [2, 2, 2, 1], 2), row("D", [0, 0, 1, 0], 3), row("E", [1, 1, 1, 2], 4), row("F", [0, 1, 0, 0], 5)];
+  const bySum = complete.slice().sort((a, b) => b.sum - a.sum || a.sourceIndex - b.sourceIndex).map((r) => r.behavior);
+  assert.deepEqual(complete.slice().sort(topOrder).map((r) => r.behavior), bySum);
+  // Missing scores: A has the larger sum but the lower mean.
+  const missing = [row("A", [1, 1, 1, 1, 1, 2], 0), row("B", [2, 2, 2, null, null, null], 1), row("C", [0, 0, 1, 0, 0, 0], 2), row("D", [0, 1, 0, 1, 0, 0], 3), row("E", [1, 0, 1, 0, 1, 0], 4), row("F", [0, 0, 0, 0, 0, 0], 5)];
+  assert(missing[0].sum > missing[1].sum && missing[1].mean > missing[0].mean);
+  const ranked = rankBehaviors(missing)[0];
+  assert.deepEqual(ranked.key.map((r) => r.behavior), ["B", "A", "E"]);
+  assert.equal(ranked.development[0].behavior, "F");
+  // Equal means: the top list prefers the larger share of 2; the bottom list the larger share of 0; then column order.
+  const ties = [row("P", [2, 0, 1, 1], 0), row("Q", [1, 1, 1, 1], 1), row("R", [2, 0, 2, 0], 2), row("S", [1, 1, 1, 1], 3), row("T", [0, 0, 0, 0], 4), row("U", [0, 0, 0, 1], 5)];
+  const tied = rankBehaviors(ties)[0];
+  assert.deepEqual(tied.key.map((r) => r.behavior), ["R", "P", "Q"]);
+  assert.deepEqual(tied.development.map((r) => r.behavior), ["T", "U", "S"]);
+});
+
+test("R5 by mean in a group view ranks the group's own scores", () => {
+  const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: summary }, { name: "detail.xlsx", bytes: detailed }], { projectName: "Synthetic project", splitGroups: true }, {}, { acknowledgedWarningIds: [] });
+  const plan = reportPlan(payload);
+  const groupFindings = plan.filter((item) => item.family === "key-findings" && item.groupKey);
+  for (const item of groupFindings) for (const row of [...item.insight.key, ...item.insight.development]) assert(row.n <= payload.groups.find((group) => group.code === item.groupKey).records.length);
+  const audit = createAuditWorkbook(XLSX, payload);
+  assert.equal(JSON.stringify(XLSX.utils.sheet_to_json(audit.Sheets.Clasament, { header: 1 })[0].slice(0, 5)), JSON.stringify(["Competență", "Comportament", "Medie 0–2", "% scor 2", "% scor 0"]));
 });

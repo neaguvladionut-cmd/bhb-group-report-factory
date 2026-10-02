@@ -77,7 +77,14 @@ export const pageGroups = (items, size) => items.length ? splitEqual(items, size
 export const participantChartPageSize = () => PARTICIPANT_START_CAPS["competency-participants"];
 export const participantComparisonPageSize = PARTICIPANT_START_CAPS["participant-comparison"];
 
-// R5 as amended by D313: rank by the sum of present scores; ties by import order.
+// R5 (Vlad 2026-10-02): each behaviour is ranked by its MEAN score (0–2) over the participants who have a score for it
+// (missing never counts; an all-unscored behaviour has no aggregate and stays out of the ranking and the count).
+// Top list: mean desc, then share scoring 2 desc, then column order. Bottom list: mean asc, then share scoring 0
+// desc, then column order. Cuts: ≥ 10 → 5 + 5, 6–9 → 3 + 3, < 6 → even halves, odd middle skipped. No behaviour
+// appears in both lists.
+const meanOf = (row) => (Number.isFinite(row.mean) ? row.mean : row.sum ?? 0);
+export const topOrder = (a, b) => meanOf(b) - meanOf(a) || (b.pct2 ?? 0) - (a.pct2 ?? 0) || a.sourceIndex - b.sourceIndex;
+export const bottomOrder = (a, b) => meanOf(a) - meanOf(b) || (b.pct0 ?? 0) - (a.pct0 ?? 0) || a.sourceIndex - b.sourceIndex;
 export function rankBehaviors(rows = []) {
   const groups = new Map();
   rows.forEach((row, index) => {
@@ -85,20 +92,12 @@ export function rankBehaviors(rows = []) {
     groups.get(row.competency).push({ ...row, sourceIndex: row.sourceIndex ?? index });
   });
   return [...groups.entries()].map(([competency, items]) => {
-    const ranked = items.slice().sort((a, b) => (b.sum ?? 0) - (a.sum ?? 0) || a.sourceIndex - b.sourceIndex);
-    let keyCount = 0; let developmentCount = 0; let medianBehavior = null;
-    if (ranked.length >= 10) { keyCount = 5; developmentCount = 5; }
-    else if (ranked.length >= 6) { keyCount = 3; developmentCount = 3; }
-    else {
-      // Below 6 (Vlad, 2026-10-01): an even count splits exactly in half; an odd count skips the middle behaviour.
-      const half = Math.floor(ranked.length / 2);
-      medianBehavior = ranked.length % 2 ? ranked[half] : null;
-      keyCount = half;
-      developmentCount = half;
-    }
-    const key = ranked.slice(0, keyCount);
-    const development = ranked.slice(ranked.length - developmentCount);
-    return { competency, ranked, key, development, strengths: key, median: medianBehavior, all: ranked };
+    const ranked = items.slice().sort(topOrder);
+    const count = ranked.length < 6 ? Math.floor(ranked.length / 2) : ranked.length >= 10 ? 5 : 3;
+    const key = ranked.slice(0, count);
+    const development = items.slice().sort(bottomOrder).filter((row) => !key.includes(row)).slice(0, count);
+    const leftover = ranked.filter((row) => !key.includes(row) && !development.includes(row));
+    return { competency, ranked, key, development, strengths: key, median: ranked.length < 6 && ranked.length % 2 ? leftover[0] || null : null, all: ranked };
   });
 }
 export const behaviorInsights = (rows) => rankBehaviors(rows).map((item) => ({ ...item, strengths: item.key, development: item.development }));

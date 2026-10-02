@@ -318,7 +318,10 @@ function createAuditWorkbook(XLSX, payload) {
   add("Comportamente", [["Competență", "Comportament", "Text importat (brut)", "N", "Sumă scoruri prezente", "Medie 0–2", "% scor 0", "% scor 2", "Descriptor scor 0", "Descriptor scor 2", "Sursă descriptor"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.behaviorRaw || item.behavior, item.n, item.sum, item.mean, item.pct0, item.pct2, item.score0, item.score2, item.descriptorSource])]);
   add("Grupuri", [["CODE", "N", "Nume afișat"], ...payload.groups.map((group) => [group.code, group.records.length, payload.metadata.groupNames?.[group.code] || group.code])]);
   add("Zone", [["Regiune", "N", ...payload.competencies], ...payload.zones.map((zone) => [zone.region, zone.records.length, ...payload.competencies.map((competency) => scoreStats(zone.records, competency).mean ?? "")])]);
-  add("Clasament", [["Competență", "Comportament", "Sumă", "N", "% scor 0", "% scor 2"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.sum, item.n, item.pct0, item.pct2])]);
+  // R5 ranking basis (Vlad 2026-10-02): mean over scored participants, share scoring 2, share scoring 0; ordered within
+  // each competency by mean desc, then share 2 desc, then column order.
+  const ranking = payload.behaviorAggregates.slice().sort((a, b) => payload.competencies.indexOf(a.competency) - payload.competencies.indexOf(b.competency) || (b.mean ?? 0) - (a.mean ?? 0) || b.pct2 - a.pct2 || a.sourceIndex - b.sourceIndex);
+  add("Clasament", [["Competență", "Comportament", "Medie 0–2", "% scor 2", "% scor 0", "N scorați", "Sumă"], ...ranking.map((item) => [item.competency, item.behavior, item.mean, item.pct2, item.pct0, item.n, item.sum])]);
   for (const name of workbook.SheetNames) workbook.Sheets[name]["!cols"] = Array.from({ length: 16 }, (_, index) => ({ wch: index === 0 ? 32 : 20 }));
   return workbook;
 }
@@ -405,7 +408,14 @@ const pageGroups = (items, size) => items.length ? splitEqual(items, size) : [[]
 const participantChartPageSize = () => PARTICIPANT_START_CAPS["competency-participants"];
 const participantComparisonPageSize = PARTICIPANT_START_CAPS["participant-comparison"];
 
-// R5 as amended by D313: rank by the sum of present scores; ties by import order.
+// R5 (Vlad 2026-10-02): each behaviour is ranked by its MEAN score (0–2) over the participants who have a score for it
+// (missing never counts; an all-unscored behaviour has no aggregate and stays out of the ranking and the count).
+// Top list: mean desc, then share scoring 2 desc, then column order. Bottom list: mean asc, then share scoring 0
+// desc, then column order. Cuts: ≥ 10 → 5 + 5, 6–9 → 3 + 3, < 6 → even halves, odd middle skipped. No behaviour
+// appears in both lists.
+const meanOf = (row) => (Number.isFinite(row.mean) ? row.mean : row.sum ?? 0);
+const topOrder = (a, b) => meanOf(b) - meanOf(a) || (b.pct2 ?? 0) - (a.pct2 ?? 0) || a.sourceIndex - b.sourceIndex;
+const bottomOrder = (a, b) => meanOf(a) - meanOf(b) || (b.pct0 ?? 0) - (a.pct0 ?? 0) || a.sourceIndex - b.sourceIndex;
 function rankBehaviors(rows = []) {
   const groups = new Map();
   rows.forEach((row, index) => {
@@ -413,20 +423,12 @@ function rankBehaviors(rows = []) {
     groups.get(row.competency).push({ ...row, sourceIndex: row.sourceIndex ?? index });
   });
   return [...groups.entries()].map(([competency, items]) => {
-    const ranked = items.slice().sort((a, b) => (b.sum ?? 0) - (a.sum ?? 0) || a.sourceIndex - b.sourceIndex);
-    let keyCount = 0; let developmentCount = 0; let medianBehavior = null;
-    if (ranked.length >= 10) { keyCount = 5; developmentCount = 5; }
-    else if (ranked.length >= 6) { keyCount = 3; developmentCount = 3; }
-    else {
-      // Below 6 (Vlad, 2026-10-01): an even count splits exactly in half; an odd count skips the middle behaviour.
-      const half = Math.floor(ranked.length / 2);
-      medianBehavior = ranked.length % 2 ? ranked[half] : null;
-      keyCount = half;
-      developmentCount = half;
-    }
-    const key = ranked.slice(0, keyCount);
-    const development = ranked.slice(ranked.length - developmentCount);
-    return { competency, ranked, key, development, strengths: key, median: medianBehavior, all: ranked };
+    const ranked = items.slice().sort(topOrder);
+    const count = ranked.length < 6 ? Math.floor(ranked.length / 2) : ranked.length >= 10 ? 5 : 3;
+    const key = ranked.slice(0, count);
+    const development = items.slice().sort(bottomOrder).filter((row) => !key.includes(row)).slice(0, count);
+    const leftover = ranked.filter((row) => !key.includes(row) && !development.includes(row));
+    return { competency, ranked, key, development, strengths: key, median: ranked.length < 6 && ranked.length % 2 ? leftover[0] || null : null, all: ranked };
   });
 }
 const behaviorInsights = (rows) => rankBehaviors(rows).map((item) => ({ ...item, strengths: item.key, development: item.development }));
@@ -691,7 +693,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
 
-Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,MIN_PARTICIPANT_LABEL_PT,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
+Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,MIN_PARTICIPANT_LABEL_PT,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,topOrder,bottomOrder,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
 
 (()=>{
 // BP-GRF-R fill layer: writes plan data into the named shapes of a cloned Trend template slide

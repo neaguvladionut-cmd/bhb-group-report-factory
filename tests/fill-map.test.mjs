@@ -291,7 +291,9 @@ test("ruling 8: R5 below six behaviours splits evenly or skips the middle one, o
     const plan = generated.plan[behaviorIndex];
     assert.equal(plan.key.length, expected[count]); assert.equal(plan.development.length, expected[count]);
     assert.equal(tableRows(getShape(generated.slides[behaviorIndex], 7)).length, 1 + expected[count]);
-    if (count % 2) assert(!plan.key.concat(plan.development).includes(`C${count}-B${(count + 1) / 2}`), "the middle behaviour is skipped");
+    const listed = plan.key.concat(plan.development);
+    assert.equal(new Set(listed).size, listed.length, "no behaviour in both lists");
+    if (count % 2) assert.equal(listed.length, count - 1, "the odd middle behaviour is skipped");
     const finding = generated.plan.findIndex((item) => item.family === "key-findings" && item.competency === name);
     assert.equal(text(getShape(generated.slides[finding], 17)).split("\n").filter(Boolean).length, expected[count]);
   }

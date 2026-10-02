@@ -315,7 +315,10 @@ export function createAuditWorkbook(XLSX, payload) {
   add("Comportamente", [["Competență", "Comportament", "Text importat (brut)", "N", "Sumă scoruri prezente", "Medie 0–2", "% scor 0", "% scor 2", "Descriptor scor 0", "Descriptor scor 2", "Sursă descriptor"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.behaviorRaw || item.behavior, item.n, item.sum, item.mean, item.pct0, item.pct2, item.score0, item.score2, item.descriptorSource])]);
   add("Grupuri", [["CODE", "N", "Nume afișat"], ...payload.groups.map((group) => [group.code, group.records.length, payload.metadata.groupNames?.[group.code] || group.code])]);
   add("Zone", [["Regiune", "N", ...payload.competencies], ...payload.zones.map((zone) => [zone.region, zone.records.length, ...payload.competencies.map((competency) => scoreStats(zone.records, competency).mean ?? "")])]);
-  add("Clasament", [["Competență", "Comportament", "Sumă", "N", "% scor 0", "% scor 2"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.sum, item.n, item.pct0, item.pct2])]);
+  // R5 ranking basis (Vlad 2026-10-02): mean over scored participants, share scoring 2, share scoring 0; ordered within
+  // each competency by mean desc, then share 2 desc, then column order.
+  const ranking = payload.behaviorAggregates.slice().sort((a, b) => payload.competencies.indexOf(a.competency) - payload.competencies.indexOf(b.competency) || (b.mean ?? 0) - (a.mean ?? 0) || b.pct2 - a.pct2 || a.sourceIndex - b.sourceIndex);
+  add("Clasament", [["Competență", "Comportament", "Medie 0–2", "% scor 2", "% scor 0", "N scorați", "Sumă"], ...ranking.map((item) => [item.competency, item.behavior, item.mean, item.pct2, item.pct0, item.n, item.sum])]);
   for (const name of workbook.SheetNames) workbook.Sheets[name]["!cols"] = Array.from({ length: 16 }, (_, index) => ({ wch: index === 0 ? 32 : 20 }));
   return workbook;
 }
