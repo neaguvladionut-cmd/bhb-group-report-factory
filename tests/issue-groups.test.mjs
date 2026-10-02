@@ -104,3 +104,11 @@ test("issue search narrows the visible rows and count, then Arată toate reveals
   assert.equal(card.querySelectorAll(".issue-item").length, 8);
   assert.equal(reveal.textContent, "Arată toate (160)");
 });
+
+test("the served app bundle defines every issue helper it calls", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const bundle = await readFile(new URL("../deploy/app.js", import.meta.url), "utf8");
+  for (const name of ["groupedIssues", "renderIssueGroup"]) {
+    if (/\b/.test(name) && bundle.includes(`${name}(`)) assert.match(bundle, new RegExp(`function ${name}\\b|${name}[,}]`), `${name} is called but never defined in deploy/app.js`);
+  }
+});

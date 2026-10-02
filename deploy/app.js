@@ -2099,6 +2099,12 @@ Object.assign(window.__grf||(window.__grf={}),{renderIssueGroup});})();
 
 (()=>{const {buildPayload,createAuditWorkbook,createEvaluationSheetTemplate,downloadBundle,downloadTrendPptx:downloadPptx,mergeSelectedFiles,methodologyColumns,mountPreview,renderIssueGroup,reportPlan,unrankedCompetencies}=window.__grf;
 
+function groupedIssues(items, severity) {
+  const groups = new Map();
+  for (const item of items) { const key = item.code || "other"; if (!groups.has(key)) groups.set(key, { key, severity, items: [] }); groups.get(key).items.push(item); }
+  return [...groups.values()];
+}
+
 if (!window.XLSX || !window.JSZip) throw new Error("Lipsesc bibliotecile locale necesare");
 
 let files = [];
