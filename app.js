@@ -2236,10 +2236,15 @@ function renderStructure() {
   root.insertAdjacentHTML("beforebegin", `<p class="field-where structure-summary-note">${plan.length} slide-uri: ${mainCount} principal · ${appendixCount} anexă · ${endCount} concluzii și încheiere. ${annex === "separate" ? "Anexa se descarcă separat, cu ambele nume de fișier afișate." : annex === "none" ? "Fără anexă: rezultatele individuale, analiza observațiilor și comportamentele cheie nu apar în livrare." : "Anexa rămâne la finalul raportului principal."}</p>`);
 }
 
+function codeGroupSummary() {
+  const groups = (payload?.groups || []).map((group) => `${group.name || group.code} · ${group.records?.length ?? 0}`);
+  if (payload?.codeReadiness?.blank) groups.push(`fără grup · ${payload.codeReadiness.blank}`);
+  return groups.length ? `Grupuri disponibile: ${groups.join(" · ")}.` : "Nu există grupuri CODE în export.";
+}
 function setReason(input, reason) { const label = input?.closest("label"); if (!label) return; let node = label.querySelector(".control-reason"); if (!reason) { node?.remove(); return; } if (!node) { node = document.createElement("small"); node.className = "control-reason"; label.append(node); } node.textContent = reason; input.setAttribute("aria-describedby", "split-help"); }
 function guardControls() {
   if (!payload) return;
-  const split = $("#split-groups"); if (split) { const unavailable = !payload.codeReadiness?.splitAvailable; split.disabled = unavailable; if (unavailable) split.checked = false; const reason = unavailable ? "Împărțirea este indisponibilă: sunt necesare cel puțin două grupuri CODE." : ""; $("#split-help") && ($("#split-help").textContent = reason || `Dezactivat implicit. ${payload.codeReadiness.blank ? `${payload.codeReadiness.blank} participanți fără grup rămân numai în vederea întregului proiect.` : "Participanții fără grup rămân numai în vederea întregului proiect."}`); setReason(split, reason); }
+  const split = $("#split-groups"); if (split) { const unavailable = !payload.codeReadiness?.splitAvailable; split.disabled = unavailable; if (unavailable) split.checked = false; const reason = unavailable ? "Împărțirea este indisponibilă: sunt necesare cel puțin două grupuri CODE." : ""; $("#split-help") && ($("#split-help").textContent = `${codeGroupSummary()} ${reason || "Dezactivat implicit. Participanții fără grup rămân numai în vederea întregului proiect."}`); setReason(split, reason); }
   const previewButton = $("#preview-trigger"); if (previewButton) previewButton.disabled = !payload.readiness;
   const separate = payload.metadata.annex === "separate"; $("#pptx-whole") && ($("#pptx-whole").hidden = separate); $("#pptx-main") && ($("#pptx-main").hidden = !separate); $("#pptx-appendix") && ($("#pptx-appendix").hidden = !separate);
 }
@@ -2287,8 +2292,6 @@ function resetSession() { files = []; payload = null; state.step = 1; state.ackn
 
 $("#sources")?.addEventListener("change", readSources);
 $("#choose-files")?.addEventListener("click", () => $("#sources")?.click());
-$("#drop-zone")?.addEventListener("click", (event) => { if (event.target.closest("button")) return; $("#sources")?.click(); });
-$("#drop-zone")?.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("#sources")?.click(); } });
 $("#drop-zone")?.addEventListener("dragover", (event) => { event.preventDefault(); $("#drop-zone").classList.add("is-dragging"); });
 $("#drop-zone")?.addEventListener("dragleave", () => $("#drop-zone").classList.remove("is-dragging"));
 $("#drop-zone")?.addEventListener("drop", (event) => { event.preventDefault(); $("#drop-zone").classList.remove("is-dragging"); const input = $("#sources"); const transfer = event.dataTransfer; if (input && transfer?.files?.length) { const dt = new DataTransfer(); [...transfer.files].forEach((file) => dt.items.add(file)); input.files = dt.files; input.dispatchEvent(new Event("change", { bubbles: true })); } });

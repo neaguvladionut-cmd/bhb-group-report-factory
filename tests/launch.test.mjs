@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import vm from "node:vm";
 import test from "node:test";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -53,4 +54,12 @@ test("source-owned build emits the new normalized payload and package-preserving
   assert.match(template, /ppt\/embeddings/u);
   assert.match(template, /generateBundle/u);
   assert.doesNotMatch(template, /PptxGenJS/u);
+});
+
+test("built deploy bundle initializes without throwing in a DOM-like vm", async () => {
+  const bundle = await readFile(resolve(root, "deploy/app.js"), "utf8");
+  const document = { body: { dataset: {} }, querySelector: () => null, querySelectorAll: () => [] };
+  const window = { XLSX: {}, JSZip: {}, __grfBooted() {} };
+  assert.doesNotThrow(() => vm.runInNewContext(bundle, { Blob, Intl, Map, Set, URL, document, window }));
+  assert.equal(typeof window.__grfDownload, "function");
 });
