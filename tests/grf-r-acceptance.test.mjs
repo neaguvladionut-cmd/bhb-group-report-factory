@@ -279,7 +279,7 @@ print(json.dumps([b-a for a,b in merged]))`, JSON.stringify({ png: join(temp, fi
       const blocks = JSON.parse(stdout).filter((height) => height >= 3);
       assert(blocks.length >= item.rows.length, `slide ${index + 1}: ${blocks.length} label blocks for ${item.rows.length} participants (labels overlap or are missing)`);
       const glyph = Math.min(...blocks); // one line of ≥ 10 pt text is at least ~9 px tall at 100 dpi (cap height + descender)
-      assert(glyph >= 9, `slide ${index + 1}: label lines are ${glyph} px tall at 100 dpi (< 10 pt)`);
+      assert(glyph >= 11, `slide ${index + 1}: label lines are ${glyph} px tall at 100 dpi (< 12 pt)`);
     }
   } finally { await rm(temp, { recursive: true, force: true }); }
 });

@@ -182,9 +182,12 @@ test("rule 10 / A2–A4: annex charts are real charts, participants split equall
   assert.equal(participantsPerSlide("participant-comparison", { seriesCount: 6 }), 5);
   const plan = variedDeck.plan;
   const pages = (family, competency) => plan.filter((item) => item.family === family && (!competency || item.competency === competency)).map((item) => item.rows.length);
-  assert.deepEqual(pages("participant-mean"), [23]);
+  // Vlad 2026-10-02: ~11 per slide with labels ≥ 12 pt; 23 participants → 8/8/7, 33 → 11/11/11.
+  assert.deepEqual(splitEqual(Array.from({ length: 33 }, (_, index) => index), participantsPerSlide("competency-participants", { longestLabel: 14 })).map((page) => page.length), [11, 11, 11]);
+  assert.deepEqual(pages("participant-mean"), [8, 8, 7]);
   assert.deepEqual(pages("participant-comparison"), [5, 5, 5, 4, 4]);
-  for (const name of plan.filter((item) => item.family === "competency-participants").map((item) => item.competency)) assert.deepEqual(pages("competency-participants", name), [12, 11]);
+  for (const name of plan.filter((item) => item.family === "competency-participants").map((item) => item.competency)) assert.deepEqual(pages("competency-participants", name), [8, 8, 7]);
+  for (const family of ["participant-mean", "participant-comparison", "competency-participants"]) assert(plan.filter((item) => item.family === family).every((item) => item.labelSize >= 1200), `${family} labels ≥ 12 pt`);
   const sixth = plan.findIndex((item) => item.family === "competency-participants" && item.competencyIndex === 5);
   assert.equal(plan[sixth].templateIndex, 13);
   assert.equal(variedParticipants.length, 23);
@@ -412,14 +415,14 @@ test("F39: with every slide type off and no annex the how-to-read keeps only the
   assert.deepEqual(off.find((item) => item.family === "how-to-read").paragraphs, ["Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim.", "Rezultatele descriu grupul evaluat."]);
 });
 
-test("A2 follows rule 10: labels ≥ 10 pt, one size per series, equal readable pages (insp5: 11 + 11)", async () => {
+test("A2 follows rule 10: labels ≥ 12 pt, one size per series, equal readable pages (insp5: 11 + 11)", async () => {
   const pages = insp5Deck.plan.map((item, index) => [item, index]).filter(([item]) => item.family === "participant-mean");
   assert.deepEqual(pages.map(([item]) => item.rows.length), [11, 11]);
   assert.equal(new Set(pages.map(([item]) => item.labelSize)).size, 1);
   for (const [item, index] of pages) {
     const [{ chart }] = await insp5Deck.chartsOf(index);
     const size = Number(chart.match(/<c:catAx>[\s\S]*?<a:defRPr\b[^>]*\bsz="(\d+)"/u)[1]);
-    assert(size >= 1000, `A2 label ${size / 100} pt`); assert.equal(size, Math.min(2400, item.labelSize));
+    assert(size >= 1200, `A2 label ${size / 100} pt`); assert.equal(size, Math.min(2400, item.labelSize));
   }
 });
 

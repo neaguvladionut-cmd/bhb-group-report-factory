@@ -40,7 +40,9 @@ export const TEMPLATE_TITLES = {
 export const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark", "population", "zone", "behavior", "participant-mean", "participant-comparison", "competency-participants"]);
 
 // Rule 10: readable participants per slide, split into the fewest slides, sizes differing by at most one.
-export const PARTICIPANT_START_CAPS = { "participant-mean": 25, "participant-comparison": 5, "competency-participants": 20 };
+// Vlad 2026-10-02: ~11 participants per annex slide, labels ≥ 12 pt (A3 keeps its 5 groups of bars).
+export const PARTICIPANT_START_CAPS = { "participant-mean": 11, "participant-comparison": 5, "competency-participants": 11 };
+export const MIN_PARTICIPANT_LABEL_PT = 12;
 // A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
 // segment, and at least a quarter of the whole name (F34).
 export const A2_LABEL_COLUMN_IN = 4.3;
@@ -58,7 +60,7 @@ export function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } =
   }
   const plotWidth = 17.2; // column charts t9 / t13–t17, gap 219 %, overlap −27 %
   const barSlot = 0.12 * (seriesCount * 1.27 - 0.27 + 2.19);
-  const labelSlot = Math.max(1, longestLabel) * 10 * 0.55 / 72; // longestLabel = labelChars(): a 10 pt label wraps onto ≤ 4 lines
+  const labelSlot = Math.max(1, longestLabel) * MIN_PARTICIPANT_LABEL_PT * 0.55 / 72; // longestLabel = labelChars(): a 12 pt label wraps onto ≤ 4 lines
   return Math.max(1, Math.floor(plotWidth / Math.max(barSlot, labelSlot)));
 }
 export function participantsPerSlide(family, options = {}) { return Math.max(1, Math.min(PARTICIPANT_START_CAPS[family] || 20, readableCapacity(family, options))); }
@@ -287,9 +289,9 @@ function appendixSlides(payload) {
   // many participants as keep every label ≥ 10 pt on its own rows, split into equal pages.
   const plotPoints = 0.9 * 9.25 * 72; const columnPoints = A2_LABEL_COLUMN_IN * 72;
   const slotFor = (size) => Math.max(...participants.map((row) => wrapLabel(row.name, size, columnPoints))) * size * 1.3 + 6;
-  const meanCap = Math.max(1, Math.min(PARTICIPANT_START_CAPS["participant-mean"], Math.floor(plotPoints / Math.max(slotFor(10), 0.3 * 72))));
+  const meanCap = Math.max(1, Math.min(PARTICIPANT_START_CAPS["participant-mean"], Math.floor(plotPoints / Math.max(slotFor(MIN_PARTICIPANT_LABEL_PT), 0.3 * 72))));
   const meanPages = splitEqual(participants, meanCap);
-  let meanSize = 24; while (meanSize > 10 && !meanPages.every((rows) => slotFor(meanSize) <= plotPoints / Math.max(1, rows.length))) meanSize -= 1;
+  let meanSize = 24; while (meanSize > MIN_PARTICIPANT_LABEL_PT && !meanPages.every((rows) => slotFor(meanSize) <= plotPoints / Math.max(1, rows.length))) meanSize -= 1;
   meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length, labelSize: meanSize * 100 }));
   const comparisonPages = splitEqual(participants, participantsPerSlide("participant-comparison", { seriesCount: competencies.length, longestLabel }));
   comparisonPages.forEach((rows, page) => add("participant-comparison", { rows, competencies, page: page + 1, pages: comparisonPages.length }));
@@ -301,7 +303,7 @@ function appendixSlides(payload) {
   // F34: one label size per annex series — the smallest per-page fit (≤ 20 pt, ≥ 10 pt).
   for (const family of ["participant-comparison", "competency-participants"]) {
     const pages = slides.filter((slide) => slide.family === family);
-    const fit = (page) => { const slot = 17.2 * 72 / Math.max(1, page.rows.length) * 0.9; const need = Math.max(1, ...page.rows.map((row) => labelChars(row.name))); return Math.max(1000, Math.min(2000, Math.floor(slot / (need * 0.55)) * 100)); };
+    const fit = (page) => { const slot = 17.2 * 72 / Math.max(1, page.rows.length) * 0.9; const need = Math.max(1, ...page.rows.map((row) => labelChars(row.name))); return Math.max(MIN_PARTICIPANT_LABEL_PT * 100, Math.min(2000, Math.floor(slot / (need * 0.55)) * 100)); };
     const size = Math.min(2000, ...pages.map(fit));
     pages.forEach((page) => { page.labelSize = size; });
   }

@@ -368,7 +368,9 @@ const TEMPLATE_TITLES = {
 const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark", "population", "zone", "behavior", "participant-mean", "participant-comparison", "competency-participants"]);
 
 // Rule 10: readable participants per slide, split into the fewest slides, sizes differing by at most one.
-const PARTICIPANT_START_CAPS = { "participant-mean": 25, "participant-comparison": 5, "competency-participants": 20 };
+// Vlad 2026-10-02: ~11 participants per annex slide, labels ≥ 12 pt (A3 keeps its 5 groups of bars).
+const PARTICIPANT_START_CAPS = { "participant-mean": 11, "participant-comparison": 5, "competency-participants": 11 };
+const MIN_PARTICIPANT_LABEL_PT = 12;
 // A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
 // segment, and at least a quarter of the whole name (F34).
 const A2_LABEL_COLUMN_IN = 4.3;
@@ -386,7 +388,7 @@ function readableCapacity(family, { seriesCount = 1, longestLabel = 0 } = {}) {
   }
   const plotWidth = 17.2; // column charts t9 / t13–t17, gap 219 %, overlap −27 %
   const barSlot = 0.12 * (seriesCount * 1.27 - 0.27 + 2.19);
-  const labelSlot = Math.max(1, longestLabel) * 10 * 0.55 / 72; // longestLabel = labelChars(): a 10 pt label wraps onto ≤ 4 lines
+  const labelSlot = Math.max(1, longestLabel) * MIN_PARTICIPANT_LABEL_PT * 0.55 / 72; // longestLabel = labelChars(): a 12 pt label wraps onto ≤ 4 lines
   return Math.max(1, Math.floor(plotWidth / Math.max(barSlot, labelSlot)));
 }
 function participantsPerSlide(family, options = {}) { return Math.max(1, Math.min(PARTICIPANT_START_CAPS[family] || 20, readableCapacity(family, options))); }
@@ -615,9 +617,9 @@ function appendixSlides(payload) {
   // many participants as keep every label ≥ 10 pt on its own rows, split into equal pages.
   const plotPoints = 0.9 * 9.25 * 72; const columnPoints = A2_LABEL_COLUMN_IN * 72;
   const slotFor = (size) => Math.max(...participants.map((row) => wrapLabel(row.name, size, columnPoints))) * size * 1.3 + 6;
-  const meanCap = Math.max(1, Math.min(PARTICIPANT_START_CAPS["participant-mean"], Math.floor(plotPoints / Math.max(slotFor(10), 0.3 * 72))));
+  const meanCap = Math.max(1, Math.min(PARTICIPANT_START_CAPS["participant-mean"], Math.floor(plotPoints / Math.max(slotFor(MIN_PARTICIPANT_LABEL_PT), 0.3 * 72))));
   const meanPages = splitEqual(participants, meanCap);
-  let meanSize = 24; while (meanSize > 10 && !meanPages.every((rows) => slotFor(meanSize) <= plotPoints / Math.max(1, rows.length))) meanSize -= 1;
+  let meanSize = 24; while (meanSize > MIN_PARTICIPANT_LABEL_PT && !meanPages.every((rows) => slotFor(meanSize) <= plotPoints / Math.max(1, rows.length))) meanSize -= 1;
   meanPages.forEach((rows, page) => add("participant-mean", { rows, page: page + 1, pages: meanPages.length, labelSize: meanSize * 100 }));
   const comparisonPages = splitEqual(participants, participantsPerSlide("participant-comparison", { seriesCount: competencies.length, longestLabel }));
   comparisonPages.forEach((rows, page) => add("participant-comparison", { rows, competencies, page: page + 1, pages: comparisonPages.length }));
@@ -629,7 +631,7 @@ function appendixSlides(payload) {
   // F34: one label size per annex series — the smallest per-page fit (≤ 20 pt, ≥ 10 pt).
   for (const family of ["participant-comparison", "competency-participants"]) {
     const pages = slides.filter((slide) => slide.family === family);
-    const fit = (page) => { const slot = 17.2 * 72 / Math.max(1, page.rows.length) * 0.9; const need = Math.max(1, ...page.rows.map((row) => labelChars(row.name))); return Math.max(1000, Math.min(2000, Math.floor(slot / (need * 0.55)) * 100)); };
+    const fit = (page) => { const slot = 17.2 * 72 / Math.max(1, page.rows.length) * 0.9; const need = Math.max(1, ...page.rows.map((row) => labelChars(row.name))); return Math.max(MIN_PARTICIPANT_LABEL_PT * 100, Math.min(2000, Math.floor(slot / (need * 0.55)) * 100)); };
     const size = Math.min(2000, ...pages.map(fit));
     pages.forEach((page) => { page.labelSize = size; });
   }
@@ -663,7 +665,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
 
-Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
+Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,MIN_PARTICIPANT_LABEL_PT,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
 
 (()=>{
 // BP-GRF-R fill layer: writes plan data into the named shapes of a cloned Trend template slide
@@ -1122,7 +1124,7 @@ function chartSpec(item) {
 function columnLabelSize(rows) {
   const slotPoints = 17.2 * 72 / Math.max(1, rows.length) * 0.9;
   const longestWord = Math.max(1, ...rows.flatMap((row) => String(row.name).split(/\s+/u).map((word) => word.length)));
-  return Math.max(1000, Math.min(2000, Math.floor(slotPoints / (longestWord * 0.6)) * 100));
+  return Math.max(1200, Math.min(2000, Math.floor(slotPoints / (longestWord * 0.6)) * 100));
 }
 
 
@@ -1146,7 +1148,7 @@ function fitLabels(labels, { max, width, height, maxLines = 4 }) {
 const templateLayout = (chartXml) => { const match = chartXml.match(/<c:plotArea><c:layout><c:manualLayout>[\s\S]*?<c:x val="([^"]+)"\/><c:y val="([^"]+)"\/><c:w val="([^"]+)"\/><c:h val="([^"]+)"\/>/u); return match ? { x: Number(match[1]), y: Number(match[2]), w: Number(match[3]), h: Number(match[4]) } : null; };
 /** Lowest plot bottom (fraction of the frame) that leaves the wrapped participant labels above the footer. */
 function labelFloor(item, frame, layout) {
-  const size = (item.labelSize || 1000) / 100; const slot = layout.w * frame.cx / PT / Math.max(1, item.rows.length) * 0.92;
+  const size = (item.labelSize || 1200) / 100; const slot = layout.w * frame.cx / PT / Math.max(1, item.rows.length) * 0.92;
   const lines = Math.max(1, ...item.rows.map((row) => wrappedLines(String(row.name).replace(/-/gu, "- "), size, slot)));
   return (FOOTER_TOP - (lines * size * 1.3 + 8) * PT - frame.y) / frame.cy;
 }
@@ -1171,7 +1173,7 @@ function chartLayout(item, chartXml, slideXml, spec) {
     const frame = xfrmOf(getShape(slideXml, 2)); const band = visualBox(getShape(slideXml, 3));
     const perPoint = band.cx / (high - low); const right = band.x + (5 - low) * perPoint; // x(5) from the template rectangle
     const top = frame.y + 0.07 * frame.cy; const height = 0.9 * frame.cy; const slot = height / Math.max(1, item.rows.length) / PT;
-    const size = Math.max(1000, Math.min(axisLabelSize(chartXml, "catAx"), item.labelSize || 1000));
+    const size = Math.max(1200, Math.min(axisLabelSize(chartXml, "catAx"), item.labelSize || 1200));
     // The label column holds the names on wrapped lines (≤ 4.3 in), never wider than the longest name needs.
     const widest = Math.max(...item.rows.map((row) => String(row.name).length * size / 100 * 0.55));
     const labelWidth = (Math.min(4.3 * 72, widest) + 24) * PT;

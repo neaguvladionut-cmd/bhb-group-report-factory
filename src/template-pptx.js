@@ -55,7 +55,7 @@ export function chartSpec(item) {
 function columnLabelSize(rows) {
   const slotPoints = 17.2 * 72 / Math.max(1, rows.length) * 0.9;
   const longestWord = Math.max(1, ...rows.flatMap((row) => String(row.name).split(/\s+/u).map((word) => word.length)));
-  return Math.max(1000, Math.min(2000, Math.floor(slotPoints / (longestWord * 0.6)) * 100));
+  return Math.max(1200, Math.min(2000, Math.floor(slotPoints / (longestWord * 0.6)) * 100));
 }
 
 
@@ -79,7 +79,7 @@ function fitLabels(labels, { max, width, height, maxLines = 4 }) {
 const templateLayout = (chartXml) => { const match = chartXml.match(/<c:plotArea><c:layout><c:manualLayout>[\s\S]*?<c:x val="([^"]+)"\/><c:y val="([^"]+)"\/><c:w val="([^"]+)"\/><c:h val="([^"]+)"\/>/u); return match ? { x: Number(match[1]), y: Number(match[2]), w: Number(match[3]), h: Number(match[4]) } : null; };
 /** Lowest plot bottom (fraction of the frame) that leaves the wrapped participant labels above the footer. */
 function labelFloor(item, frame, layout) {
-  const size = (item.labelSize || 1000) / 100; const slot = layout.w * frame.cx / PT / Math.max(1, item.rows.length) * 0.92;
+  const size = (item.labelSize || 1200) / 100; const slot = layout.w * frame.cx / PT / Math.max(1, item.rows.length) * 0.92;
   const lines = Math.max(1, ...item.rows.map((row) => wrappedLines(String(row.name).replace(/-/gu, "- "), size, slot)));
   return (FOOTER_TOP - (lines * size * 1.3 + 8) * PT - frame.y) / frame.cy;
 }
@@ -104,7 +104,7 @@ function chartLayout(item, chartXml, slideXml, spec) {
     const frame = xfrmOf(getShape(slideXml, 2)); const band = visualBox(getShape(slideXml, 3));
     const perPoint = band.cx / (high - low); const right = band.x + (5 - low) * perPoint; // x(5) from the template rectangle
     const top = frame.y + 0.07 * frame.cy; const height = 0.9 * frame.cy; const slot = height / Math.max(1, item.rows.length) / PT;
-    const size = Math.max(1000, Math.min(axisLabelSize(chartXml, "catAx"), item.labelSize || 1000));
+    const size = Math.max(1200, Math.min(axisLabelSize(chartXml, "catAx"), item.labelSize || 1200));
     // The label column holds the names on wrapped lines (≤ 4.3 in), never wider than the longest name needs.
     const widest = Math.max(...item.rows.map((row) => String(row.name).length * size / 100 * 0.55));
     const labelWidth = (Math.min(4.3 * 72, widest) + 24) * PT;
