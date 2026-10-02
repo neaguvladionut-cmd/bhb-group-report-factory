@@ -1198,6 +1198,9 @@ function columnLabelSize(rows) {
 // ---------------------------------------------------------------- chart text fit (F21/F22)
 const PT = EMU / 72;
 const FOOTER_TOP = 10.45 * EMU; // the TREND footer mark starts below this line on every content slide
+// The cleaned Trend asset is a fixed 20 × 11.25 in slide. Media is normalised at
+// fill time so the source asset can remain faithful to the supplied template.
+const SLIDE_SIZE = { cx: 20 * EMU, cy: 11.25 * EMU };
 function wrappedLines(value, size, width) {
   const charWidth = size * 0.5; let lines = 1; let line = 0;
   for (const word of String(value).split(/\s+/u).filter(Boolean)) { const w = word.length * charWidth; const gap = line ? charWidth : 0; if (line && line + gap + w > width) { lines += 1; line = w; } else line += gap + w; while (line > width) { lines += 1; line -= width; } }
@@ -1581,16 +1584,48 @@ function equaliseSiblings(xml, ids) {
   for (const id of ids) xml = updateShape(xml, id, (shape) => { const size = largestSize(shape); return size > target ? scaleRunSizes(shape, target / size) : shape; });
   return xml;
 }
+
+function srcRectOf(shapeXml) {
+  const match = shapeXml.match(/<a:srcRect\b([^>]*)\/?>(?:<\/a:srcRect>)?/u);
+  const attrs = match?.[1] || "";
+  const value = (name) => Number(attrs.match(new RegExp(`\\b${name}=\"(-?\\d+)\"`, "u"))?.[1] || 0);
+  return { l: value("l"), t: value("t"), r: value("r"), b: value("b") };
+}
+function setSrcRect(shapeXml, crop) {
+  const value = `<a:srcRect l="${Math.round(crop.l)}" t="${Math.round(crop.t)}" r="${Math.round(crop.r)}" b="${Math.round(crop.b)}"/>`;
+  if (/<a:srcRect\b/u.test(shapeXml)) return shapeXml.replace(/<a:srcRect\b[^>]*\/?>(?:<\/a:srcRect>)?/u, value);
+  return shapeXml.replace(/(<a:blip\b[\s\S]*?<\/a:blip>)/u, `$1${value}`);
+}
+/** Intersect a media frame with the slide; pictures also preserve their visible source pixels. */
+function clampMediaShape(shapeXml) {
+  const frame = xfrmOf(shapeXml);
+  if (!frame) return shapeXml;
+  const left = Math.max(0, frame.x); const top = Math.max(0, frame.y);
+  const right = Math.min(SLIDE_SIZE.cx, frame.x + frame.cx); const bottom = Math.min(SLIDE_SIZE.cy, frame.y + frame.cy);
+  if (left === frame.x && top === frame.y && right === frame.x + frame.cx && bottom === frame.y + frame.cy) return shapeXml;
+  if (right <= left || bottom <= top) throw new Error(`Media frame lies entirely outside the slide: ${JSON.stringify(frame)}`);
+  const bounded = { x: left, y: top, cx: right - left, cy: bottom - top };
+  if (!/<p:pic\b/u.test(shapeXml)) return setXfrm(shapeXml, bounded);
+  const crop = srcRectOf(shapeXml);
+  const sourceWidth = 100000 - crop.l - crop.r; const sourceHeight = 100000 - crop.t - crop.b;
+  const nextCrop = {
+    l: crop.l + (left - frame.x) / frame.cx * sourceWidth,
+    t: crop.t + (top - frame.y) / frame.cy * sourceHeight,
+    r: crop.r + (frame.x + frame.cx - right) / frame.cx * sourceWidth,
+    b: crop.b + (frame.y + frame.cy - bottom) / frame.cy * sourceHeight
+  };
+  return setSrcRect(setXfrm(shapeXml, bounded), nextCrop);
+}
 function renderSlide(item, sourceXml) {
   let xml = fillSlide(sourceXml, item);
   for (const group of SIBLINGS[item.family] || []) if (group.every((id) => hasShape(xml, id))) xml = equaliseSiblings(xml, group);
   xml = applyBand(xml, chartSpec(item), item);
-  // GRF-PX: charts and pictures keep the template's exact outer frame. Dynamic plot layouts and
-  // benchmark rectangles are calculated later inside that frame; title fitting must not move the media.
+  // GRF-PX: media starts from the template's outer frame. Dynamic plot layouts and benchmark rectangles
+  // are calculated later inside that frame; only the slide-edge overhang is normalised here.
   for (const match of sourceXml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)) {
     if (match[1] === "graphicFrame" && !/<c:chart\b/u.test(match[0])) continue;
     const id = Number(match[2]); const template = getShape(sourceXml, id);
-    xml = updateShape(xml, id, (shape) => setXfrm(shape, xfrmOf(template)));
+    xml = updateShape(xml, id, () => clampMediaShape(template));
   }
   return xml;
 }
