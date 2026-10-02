@@ -39,6 +39,21 @@ async function deck(payload, scope = "whole") {
 const whole = await deck(payloadOf(acceptance, { splitGroups: false, annex: "end" }));
 const split = await deck(payloadOf(acceptance, { splitGroups: true, annex: "end" }));
 const variedDeck = await deck(payloadOf(varied, { splitGroups: true, annex: "end" }));
+const separateMain = await deck(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), "main");
+const separateAppendix = await deck(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), "appendix");
+
+const mediaFrames = (xml) => [...xml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)].filter((match) => match[1] === "pic" || /<c:chart\b/u.test(match[0])).map((match) => {
+  const shape = match[0]; const box = xfrmOf(shape);
+  return { kind: match[1], id: match[2], x: box.x, y: box.y, cx: box.cx, cy: box.cy };
+});
+
+test("GRF-PX: every chart and picture frame is EMU-exact to its template in whole, split, separate and varied decks", () => {
+  for (const [label, generated] of [["whole", whole], ["split", split], ["separate main", separateMain], ["separate appendix", separateAppendix], ["varied", variedDeck]]) {
+    generated.plan.forEach((item, index) => {
+      assert.deepEqual(mediaFrames(generated.slides[index]), mediaFrames(templateSlides.get(item.templateIndex)), `${label} slide ${index + 1} (${item.family}) media frame`);
+    });
+  }
+});
 
 test("rule 1: every generated slide holds only its template slide's shapes plus the map's New shapes", () => {
   const allowedNew = { cover: 1, "key-findings": 1, "executive-summary": 9 };

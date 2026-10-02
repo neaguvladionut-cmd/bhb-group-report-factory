@@ -1585,6 +1585,13 @@ function renderSlide(item, sourceXml) {
   let xml = fillSlide(sourceXml, item);
   for (const group of SIBLINGS[item.family] || []) if (group.every((id) => hasShape(xml, id))) xml = equaliseSiblings(xml, group);
   xml = applyBand(xml, chartSpec(item), item);
+  // GRF-PX: charts and pictures keep the template's exact outer frame. Dynamic plot layouts and
+  // benchmark rectangles are calculated later inside that frame; title fitting must not move the media.
+  for (const match of sourceXml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)) {
+    if (match[1] === "graphicFrame" && !/<c:chart\b/u.test(match[0])) continue;
+    const id = Number(match[2]); const template = getShape(sourceXml, id);
+    xml = updateShape(xml, id, (shape) => setXfrm(shape, xfrmOf(template)));
+  }
   return xml;
 }
 
