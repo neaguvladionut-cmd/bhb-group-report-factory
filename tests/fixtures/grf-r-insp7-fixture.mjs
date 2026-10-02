@@ -52,11 +52,9 @@ export const COMPS = [
     ["Rămâne eficient în situații ambigue", 9, 14, 10],
     ["Propune soluții noi la probleme vechi", 6, 15, 12] ] }
 ];
-const NAMES = ["Andreea-Maria Popescu", "Ioan Dumitrescu", "Elena Stoica", "Mihai-Alexandru Ionescu", "Cristina Georgescu", "Radu Marinescu",
-  "Alina Constantin", "Bogdan Stan", "Diana-Ioana Munteanu", "Florin Rusu", "Gabriela Toma", "Lucian Dobre", "Raluca Matei", "Sorin Lazăr",
-  "Oana-Cristina Barbu", "Vlad Ciobanu", "Irina Zamfir", "Cătălin Nistor", "Simona Preda", "Adrian Mocanu", "Larisa Vasilescu-Pop",
-  "Tudor Enache", "Monica Stănescu", "Gheorghe Pavel", "Corina Dinu", "Ștefan Ilie", "Bianca-Elena Surdu", "Marius Oprea", "Roxana Chiriac",
-  "Daniel Neagoe", "Teodora Rădulescu", "Paul Avram", "Ana Iordache"];
+// Clearly synthetic names (the Inspector's shape used realistic-looking invented names; the repo keeps synthetic labels).
+// Hyphenated and diacritic variants are kept so label wrapping is still exercised.
+const NAMES = Array.from({ length: N }, (_, i) => { const n = String(i + 1).padStart(2, "0"); return i % 7 === 0 ? `Persoană-Fictivă-Compusă Ștefănescu-Țărănuș ${n}` : i % 5 === 0 ? `Participantă Sintetică Ă${n}` : `Participant Sintetic F${n}`; });
 const CODES = ["VNZ","LOG","VNZ","","LOG","VNZ","LOG","VNZ","LOG","VNZ","","LOG","VNZ","LOG","VNZ","LOG","VNZ","LOG","","VNZ","LOG","VNZ","LOG","VNZ","LOG","VNZ","LOG","","VNZ","LOG","VNZ","LOG","VNZ"];
 const REGIONS = ["Brașov","Constanța","Timiș","Bacău","","Brașov","Constanța","Timiș","Bacău","Brașov","Constanța","","Timiș","Bacău","Brașov","Constanța","Timiș","Bacău","Brașov","","Constanța","Timiș","Bacău","Brașov","Constanța","Timiș","Bacău","Brașov","Constanța","","Timiș","Bacău","Brașov"];
 // deterministic quarter-step summary scores
