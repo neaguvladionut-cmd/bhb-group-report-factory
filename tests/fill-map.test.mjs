@@ -24,6 +24,8 @@ const EMU = 914400;
 const payloadOf = (fixture, metadata = {}) => buildPayload(XLSX, [{ name: "summary.xlsx", bytes: fixture.summary }, { name: "detail.xlsx", bytes: fixture.detailed }, { name: "evaluation-sheet-template.csv", bytes: fixture.csv }], { ...fixture.metadata, reportDate: "2026-10-01", ...metadata }, {}, { acknowledgedWarningIds: [] });
 const acceptance = acceptanceFixture(XLSX); const varied = variedFixture(XLSX);
 const template = await JSZip.loadAsync(await readFile(asset));
+const presentation = await template.file("ppt/presentation.xml").async("string");
+const slideSize = Object.fromEntries(["cx", "cy"].map((name) => [name, Number(presentation.match(new RegExp(`<p:sldSz\\b[^>]*\\b${name}=\"(\\d+)\"`, "u"))[1])]));
 const templateSlides = new Map(); for (let index = 1; index <= 22; index += 1) templateSlides.set(index, await template.file(`ppt/slides/slide${index}.xml`).async("string"));
 const shapeIds = (xml) => [...xml.matchAll(/<p:cNvPr\b[^>]*\bid="(\d+)"[^>]*\bname="([^"]*)"/gu)].map((match) => ({ id: match[1], name: decode(match[2]) }));
 const relationships = (xml) => [...xml.matchAll(/<Relationship\b([^>]*)\/>/gu)].map((match) => Object.fromEntries([...match[1].matchAll(/(Id|Type|Target)="([^"]*)"/gu)].map((part) => [part[1], part[2]])));
@@ -39,6 +41,43 @@ async function deck(payload, scope = "whole") {
 const whole = await deck(payloadOf(acceptance, { splitGroups: false, annex: "end" }));
 const split = await deck(payloadOf(acceptance, { splitGroups: true, annex: "end" }));
 const variedDeck = await deck(payloadOf(varied, { splitGroups: true, annex: "end" }));
+const separateMain = await deck(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), "main");
+const separateAppendix = await deck(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), "appendix");
+
+const mediaFrames = (xml) => [...xml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)].filter((match) => match[1] === "pic" || /<c:chart\b/u.test(match[0])).map((match) => {
+  const shape = match[0]; const box = xfrmOf(shape);
+  return { kind: match[1], id: match[2], x: box.x, y: box.y, cx: box.cx, cy: box.cy };
+});
+const allFrames = (xml) => [...xml.matchAll(/<p:(graphicFrame|pic)>[\s\S]*?<p:cNvPr\b[^>]*\bid="(\d+)"[\s\S]*?<\/p:\1>/gu)].map((match) => {
+  const box = xfrmOf(match[0]); return { kind: match[1], id: match[2], x: box.x, y: box.y, cx: box.cx, cy: box.cy };
+});
+const bounded = ({ x, y, cx, cy, ...rest }) => ({ ...rest, x: Math.max(0, x), y: Math.max(0, y), cx: Math.min(slideSize.cx, x + cx) - Math.max(0, x), cy: Math.min(slideSize.cy, y + cy) - Math.max(0, y) });
+
+test("GRF-PX: every chart and picture frame is EMU-exact to its template except at slide bounds", () => {
+  for (const [label, generated] of [["whole", whole], ["split", split], ["separate main", separateMain], ["separate appendix", separateAppendix], ["varied", variedDeck]]) {
+    generated.plan.forEach((item, index) => {
+      assert.deepEqual(mediaFrames(generated.slides[index]), mediaFrames(templateSlides.get(item.templateIndex)).map(bounded), `${label} slide ${index + 1} (${item.family}) media frame`);
+    });
+  }
+});
+
+test("GRF-PX: every picture and graphicFrame on every generated slide is within the slide", () => {
+  for (const [label, generated] of [["whole", whole], ["split", split], ["separate main", separateMain], ["separate appendix", separateAppendix], ["varied", variedDeck]]) {
+    generated.slides.forEach((xml, index) => allFrames(xml).forEach((frame) => {
+      assert(frame.x >= 0 && frame.y >= 0 && frame.x + frame.cx <= slideSize.cx && frame.y + frame.cy <= slideSize.cy, `${label} slide ${index + 1} ${frame.kind} ${frame.id} is out of bounds`);
+    }));
+  }
+});
+
+test("GRF-PX: overhanging pictures carry the matching source crop", () => {
+  const crop = (xml, id) => {
+    const shape = getShape(xml, id); const attrs = shape.match(/<a:srcRect\b([^>]*)\/?>(?:<\/a:srcRect>)?/u)?.[1] || "";
+    return Object.fromEntries(["l", "t", "r", "b"].map((name) => [name, Number(attrs.match(new RegExp(`\\b${name}=\"(-?\\d+)\"`, "u"))[1])]));
+  };
+  const cover = whole.slides[0]; const legend = whole.slides[whole.plan.findIndex((item) => item.templateIndex === 4)];
+  assert.deepEqual(crop(cover, 11), { l: 10448, t: 2151, r: 29864, b: 613 });
+  assert.deepEqual(crop(legend, 8), { l: 8874, t: 21593, r: 80355, b: 31820 });
+});
 
 test("rule 1: every generated slide holds only its template slide's shapes plus the map's New shapes", () => {
   const allowedNew = { cover: 1, "key-findings": 1, "executive-summary": 9 };
