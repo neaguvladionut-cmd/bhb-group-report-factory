@@ -803,7 +803,7 @@ export async function generateBundle(payload) {
   zip.file("data.xlsx", artifacts.workbookBytes); zip.file("manifest.json", JSON.stringify(artifacts.manifest, null, 2)); zip.file("01-report-items.pdf", artifacts.pdfBytes);
   return zip.generateAsync({ type: "blob", mimeType: "application/zip", compression: "DEFLATE" });
 }
-function downloadBlob(blob, filename) { const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function downloadBlob(blob, filename) { if (typeof window.__grfDownload === "function") { window.__grfDownload(blob, filename); return; } const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 export async function downloadTrendPptx(payload, filename = "trend-group-report.pptx", options = {}) { downloadBlob(await generateTrendPptx(payload, options), filename); }
 export async function downloadBundle(payload, filename = "bhb-report-bundle.zip") { downloadBlob(await generateBundle(payload), filename); }
 
