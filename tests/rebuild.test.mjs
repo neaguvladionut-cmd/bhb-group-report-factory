@@ -68,3 +68,31 @@ test("audit workbook carries groups, zones and ranking sheets", () => {
   assert(audit.SheetNames.includes("Zone"));
   assert(audit.SheetNames.includes("Clasament"));
 });
+
+test("summary competency scores accept decimal averages on the 1–5 scale and reject values outside it", () => {
+  const decimalSummary = workbook([
+    ["CODE", "name", "cod cp", "Leadership", "Colaborare"],
+    ["", "Synthetic Dana", "D-1", 1.5, 3.25],
+    ["", "Synthetic Emil", "D-2", 4.75, 2],
+    ["", "Synthetic Flavia", "D-3", 5.5, 0.75]
+  ]);
+  const payload = buildPayload(XLSX, [{ name: "decimal-summary.xlsx", bytes: decimalSummary }], { projectName: "Decimal synthetic" });
+  const invalid = payload.blockers.filter((item) => item.code === "summary-score");
+  assert.equal(invalid.length, 2, "only 5.5 and 0.75 are outside 1–5");
+  assert.ok(invalid.every((item) => /Synthetic Flavia|5\.5|0\.75/u.test(JSON.stringify(item)) || item.row === 4 || item.rowNumber === 4));
+  const dana = payload.records.find((record) => record.name === "Synthetic Dana");
+  assert.deepEqual(dana.scores, { Leadership: 1.5, Colaborare: 3.25 });
+  const emil = payload.records.find((record) => record.name === "Synthetic Emil");
+  assert.equal(emil.scores.Leadership, 4.75);
+});
+
+test("participants without CODE raise one grouped warning, not one per participant", () => {
+  const rows = [["CODE", "name", "cod cp", "Leadership"]];
+  for (let index = 1; index <= 12; index += 1) rows.push([index <= 2 ? "North" : "", `Synthetic Nocode ${String(index).padStart(2, "0")}`, `N-${index}`, 3]);
+  const payload = buildPayload(XLSX, [{ name: "nocode-summary.xlsx", bytes: workbook(rows) }], { projectName: "Grouped warning synthetic" });
+  const codeWarnings = payload.warnings.filter((item) => item.code === "code-missing");
+  assert.equal(codeWarnings.length, 1);
+  assert.match(codeWarnings[0].message, /^10 participanți nu au CODE/u);
+  assert.match(codeWarnings[0].message, /și încă 2/u);
+  assert.equal(codeWarnings[0].identities.length, 10);
+});

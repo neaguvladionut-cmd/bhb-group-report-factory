@@ -94,7 +94,7 @@ function parseSummary(schema, corrections = {}) {
       const score = correction?.mode === "value" ? numberValue(correction.value) : numberValue(original);
       const details = { correctionKey, sourceName: schema.sourceName, field: column.value, identity, originalValue: original, kind: "summary-score", subject: column.value };
       if (score === null) issue(issues, "warning", "summary-unrated", `${name || "Participantul"} nu are scor pentru ${column.value}; valoarea nu intră în calcule.`, rowNumber, details);
-      else if (!Number.isInteger(score) || score < 1 || score > 5) issue(issues, "blocker", "summary-score", `Scor invalid (1–5) pentru ${column.value}.`, rowNumber, details);
+      else if (!Number.isFinite(score) || score < 1 || score > 5) issue(issues, "blocker", "summary-score", `Scor invalid (1–5) pentru ${column.value}.`, rowNumber, details);
       else scores[column.value] = score;
     }
     return { name, assessment, identity, code, scores, rowNumber, source: schema.sourceName, inclusion: Object.keys(scores).length ? Object.keys(scores).length < columns.length ? "included-partial" : "included" : "excluded-unrated" };
@@ -260,7 +260,11 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const includedIdentities = new Set(records.map((record) => record.identity));
   const codeValues = [...new Set(records.map((record) => record.code).filter(Boolean))];
   const codeMissing = records.filter((record) => !record.code);
-  warnings.push(...codeMissing.map((record) => ({ severity: "warning", code: "code-missing", message: `${record.name} nu are CODE; este inclus doar în vederea întregului proiect.`, identity: record.identity, id: `code-missing:${record.identity}` })));
+  if (codeMissing.length) {
+    const names = codeMissing.map((record) => record.name);
+    const listed = names.slice(0, 8).join(", ") + (names.length > 8 ? ` și încă ${names.length - 8}` : "");
+    warnings.push({ severity: "warning", code: "code-missing", message: `${codeMissing.length} participanți nu au CODE (${listed}); sunt incluși doar în vederea întregului proiect.`, identities: codeMissing.map((record) => record.identity), id: "code-missing" });
+  }
   const zones = [...new Set(records.map((record) => record.region).filter(Boolean))].map((region) => ({ region, records: records.filter((record) => record.region === region) }));
   const regionMissing = records.filter((record) => !record.region);
   const low = Number(metadata.benchmarkLow ?? 2.75);
