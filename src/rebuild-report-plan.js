@@ -150,7 +150,8 @@ export function methodologyColumns(payload) {
   const roles = Array.isArray(metadata.populationByRole) ? metadata.populationByRole : source.populationByRole || [];
   const roleText = roleOverride || (roles.length ? roles.slice().sort((a, b) => b.count - a.count || a.role.localeCompare(b.role, "ro")).map((item) => `${item.count} ${item.role}`).join(", ") : "");
   const client = text(metadata.clientName || metadata.projectName);
-  const population = roleText ? `${payload.participantCounts?.included ?? 0} participanți (${roleText})` : `${payload.participantCounts?.included ?? 0} participanți${client ? ` ${client}` : ""}`;
+  const composedPopulation = /^\d+\s+participanți(?:\s*\(.*\))?$/iu.test(roleOverride) ? roleOverride : "";
+  const population = composedPopulation || (roleText ? String(payload.participantCounts?.included ?? 0) + " participanți (" + roleText + ")" : String(payload.participantCounts?.included ?? 0) + " participanți" + (client ? " " + client : ""));
   const location = text(metadata.location) || (source.locations || []).join(", ");
   const exerciseList = text(metadata.exercises);
   const exerciseCount = text(metadata.exerciseCount) || (exerciseList ? String(exerciseList.split(/[;,]\s*|\n/u).filter((item) => text(item)).length) : "");

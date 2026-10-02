@@ -8,6 +8,7 @@ import test from "node:test";
 import { buildPayload, createEvaluationSheetTemplate } from "../src/rebuild-core.js";
 import { HOW_TO_READ, reportPlan } from "../src/rebuild-report-plan.js";
 import { FIXED_TEMPLATE_LABELS, buildBundleArtifacts, generateTrendPptx, selfCheckPptx } from "../src/template-pptx.js";
+import { createMetaFixture } from "./fixtures/grf-ux-meta-fixture.mjs";
 
 const run = promisify(execFile);
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -87,6 +88,22 @@ test("generated Trend deck has one cloned output slide per plan item across conf
     }
     await selfCheckPptx(generated.zip);
   }
+});
+
+test("app metadata path composes the methodology population line exactly once", async () => {
+  const summary = createMetaFixture(XLSX, "s");
+  const detailed = createMetaFixture(XLSX, "d");
+  const payload = buildPayload(XLSX, [
+    { name: "meta-s-sinteza.xlsx", bytes: summary.summary },
+    { name: "meta-d-detaliat.xlsx", bytes: detailed.detailed }
+  ], { projectName: "Meta synthetic", reportDate: "02.10.2026" }, {}, { acknowledgedWarningIds: [] });
+  Object.assign(payload.metadata, { populationByRole: "20 participanți (12 Manager vânzări, 8 Specialist suport)" });
+  const plan = reportPlan(payload);
+  const generated = await generatedDeck(payload);
+  const index = plan.findIndex((item) => item.family === "methodology");
+  const text = slideText(await generated.zip.file("ppt/slides/slide" + (index + 1) + ".xml").async("string")).join(" ").replace(/\s+/gu, " ");
+  assert.match(text, /20 participanți \(12 Manager vânzări, 8 Specialist suport\)/u);
+  assert.doesNotMatch(text, /20 participanți \(20 participanți/u);
 });
 
 test("generated group slides and charts use NORD/SUD participant-only values", async () => {

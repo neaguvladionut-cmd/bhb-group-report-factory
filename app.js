@@ -49,38 +49,83 @@ function rowsFromWorkbook(XLSX, bytes, sourceName = "") {
 
 const findHeader = (rows, predicate) => rows.findIndex((row) => predicate(row.map(folded)));
 const splitPeople = (value) => text(value).split(/[,;/]/u).map(text).filter(Boolean).filter((name) => !/(?:sistem|system)/iu.test(name));
-const excelDate = (value) => typeof value === "number" && Number.isFinite(value) ? new Date(Date.UTC(1899, 11, 30) + value * 86400000) : value instanceof Date ? value : null;
+const excelDate = (value) => {
+  const raw = typeof value === "number" ? value : /^\d{4,}(?:\.\d+)?$/u.test(text(value)) ? Number(value) : null;
+  if (Number.isFinite(raw)) {
+    const date = new Date(Date.UTC(1899, 11, 30) + raw * 86400000);
+    if (Number.isFinite(date.getTime())) return date;
+  }
+  return value instanceof Date ? value : null;
+};
 const romanianDate = (value) => {
   const date = excelDate(value);
   if (date) return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(date);
   const raw = text(value);
-  const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/u);
-  if (iso) return `${iso[3].padStart(2, "0")}.${iso[2].padStart(2, "0")}.${iso[1]}`;
-  const dmy = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/u);
-  return dmy ? `${dmy[1].padStart(2, "0")}.${dmy[2].padStart(2, "0")}.${dmy[3]}` : raw;
+  const iso = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T].*)?$/u);
+  if (iso) return [iso[3].padStart(2, "0"), iso[2].padStart(2, "0"), iso[1]].join(".");
+  const dmy = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})(?:[ T].*)?$/u);
+  return dmy ? [dmy[1].padStart(2, "0"), dmy[2].padStart(2, "0"), dmy[3]].join(".") : raw;
 };
-const methodFacts = (rows, headerRow) => {
+const methodFacts = (rows, headerRow, sourceName = "") => {
   const header = (rows[headerRow] || []).map(folded);
-  const values = (name) => { const index = header.indexOf(name); return index < 0 ? [] : rows.slice(headerRow + 1).map((row) => text(row[index])).filter(Boolean); };
+  const values = (name) => { const index = header.indexOf(name); return index < 0 ? [] : rows.slice(headerRow + 1).map((row) => row[index]).filter((value) => text(value)); };
   const evaluatorIndexes = ["principal evaluator", "secondary evaluator", "evaluator 3", "evaluator 4", "evaluatori"].map((name) => header.indexOf(name)).filter((index) => index >= 0);
-  const evaluators = [...new Set(rows.slice(headerRow + 1).flatMap((row) => evaluatorIndexes.flatMap((index) => splitPeople(row[index]))))];
-  const teamSizes = rows.slice(headerRow + 1).map((row) => new Set(evaluatorIndexes.flatMap((index) => splitPeople(row[index]))).size).filter(Boolean);
-  const dates = [...new Set([...values("date"), ...values("invited at")].map(romanianDate).filter(Boolean))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
-  const location = [...new Set(values("certification location"))];
+  const dateIndexes = ["date", "invited at"].map((name) => header.indexOf(name)).filter((index) => index >= 0);
+  const nameIndex = ["name", "name the person evaluated"].map((name) => header.indexOf(name)).find((index) => index >= 0) ?? -1;
+  const assessmentIndex = ["cod cp", "cod ac"].map((name) => header.indexOf(name)).find((index) => index >= 0) ?? -1;
+  const methodologyRows = rows.slice(headerRow + 1).map((row, rowIndex) => {
+    const participantName = nameIndex >= 0 ? text(row[nameIndex]) : "";
+    const assessment = assessmentIndex >= 0 ? text(row[assessmentIndex]) : "";
+    const evaluatorNames = [...new Set(evaluatorIndexes.flatMap((index) => splitPeople(row[index])))];
+    const dates = [...new Set(dateIndexes.map((index) => romanianDate(row[index])).filter(Boolean))];
+    const locations = [...new Set([text(row[header.indexOf("certification location")])].filter(Boolean))];
+    const role = text(row[header.indexOf("job")]);
+    if (!participantName && !assessment && !evaluatorNames.length && !dates.length && !locations.length && !role) return null;
+    return { identity: participantName || assessment ? key(participantName, assessment) : sourceName + ":" + rowIndex, evaluatorNames, dates, locations, role };
+  }).filter(Boolean);
+  const evaluators = [...new Set(methodologyRows.flatMap((row) => row.evaluatorNames))];
+  const teamSizes = methodologyRows.map((row) => row.evaluatorNames.length).filter(Boolean);
+  const dates = [...new Set(methodologyRows.flatMap((row) => row.dates))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
+  const location = [...new Set(methodologyRows.flatMap((row) => row.locations))];
   const jobIndex = header.indexOf("job");
   const populationByRole = jobIndex < 0 ? [] : [...new Map(rows.slice(headerRow + 1).map((row) => text(row[jobIndex])).filter((role) => role && !/^x$/iu.test(role)).map((role) => [role, 0])).entries()].map(([role]) => ({ role, count: rows.slice(headerRow + 1).filter((row) => text(row[jobIndex]) === role).length }));
-  return { evaluators, dates, locations: location, teamSizes, populationByRole };
+  return { evaluators, dates, locations: location, teamSizes, populationByRole, methodologyRows };
 };
 
 function detectSchema(XLSX, bytes, sourceName = "export.xlsx") {
   const { sheetName, rows } = rowsFromWorkbook(XLSX, bytes, sourceName);
   const summary = findHeader(rows, (header) => header.includes("name") && header.includes("cod cp") && header.some((value) => value && !["code", "name", "cod cp", "job", "email"].includes(value)));
-  if (summary >= 0) return { kind: "ac-summary-1-5", sourceName, sheetName, headerRow: summary + 1, rows, methodology: methodFacts(rows, summary) };
+  if (summary >= 0) return { kind: "ac-summary-1-5", sourceName, sheetName, headerRow: summary + 1, rows, methodology: methodFacts(rows, summary, sourceName) };
   const detailed = findHeader(rows, (header) => header.includes("name the person evaluated") && header.includes("cod ac") && header.includes("competente"));
-  if (detailed >= 0) return { kind: "ac-detailed-0-2", sourceName, sheetName, headerRow: detailed + 1, rows, methodology: methodFacts(rows, detailed) };
+  if (detailed >= 0) return { kind: "ac-detailed-0-2", sourceName, sheetName, headerRow: detailed + 1, rows, methodology: methodFacts(rows, detailed, sourceName) };
   const descriptors = findHeader(rows, (header) => EVAL_SHEET_HEADERS.every((name) => header.includes(name)));
   if (descriptors >= 0) return { kind: "devplan-descriptors", sourceName, sheetName, headerRow: descriptors + 1, rows, methodology: { evaluators: [], dates: [], locations: [], teamSizes: [] } };
-  return { kind: "unsupported", sourceName, sheetName, headerRow: 0, rows, methodology: methodFacts(rows, 0) };
+  return { kind: "unsupported", sourceName, sheetName, headerRow: 0, rows, methodology: methodFacts(rows, 0, sourceName) };
+}
+
+function mergeMethodology(schemas) {
+  const participants = new Map();
+  for (const schema of schemas) for (const [index, row] of (schema.methodology?.methodologyRows || []).entries()) {
+    const identity = row.identity || schema.sourceName + ":" + index;
+    const current = participants.get(identity) || { identity, evaluatorNames: [], dates: [], locations: [], role: "" };
+    current.evaluatorNames = [...new Set([...current.evaluatorNames, ...(row.evaluatorNames || [])])];
+    current.dates = [...new Set([...current.dates, ...(row.dates || [])])];
+    current.locations = [...new Set([...current.locations, ...(row.locations || [])])];
+    current.role ||= row.role || "";
+    participants.set(identity, current);
+  }
+  const rows = [...participants.values()];
+  const dates = [...new Set(rows.flatMap((row) => row.dates))].sort((a, b) => a.split(".").reverse().join("").localeCompare(b.split(".").reverse().join("")));
+  const roleCounts = new Map();
+  for (const row of rows) if (row.role && !/^x$/iu.test(row.role)) roleCounts.set(row.role, (roleCounts.get(row.role) || 0) + 1);
+  return {
+    evaluators: [...new Set(rows.flatMap((row) => row.evaluatorNames))],
+    dates,
+    locations: [...new Set(rows.flatMap((row) => row.locations))],
+    teamSizes: rows.map((row) => row.evaluatorNames.length).filter(Boolean),
+    populationByRole: [...roleCounts.entries()].map(([role, count]) => ({ role, count })),
+    methodologyRows: rows
+  };
 }
 
 function summaryColumns(header) {
@@ -324,7 +369,7 @@ function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState 
   const descriptorWarnings = [];
   const aggregates = behaviorAggregates(parsedDetailed.behaviorRecords, includedIdentities, descriptors, descriptorWarnings);
   warnings.push(...descriptorWarnings);
-  const methodologySource = detailed?.methodology || { evaluators: [], dates: [], locations: [], teamSizes: [], populationByRole: [] };
+  const methodologySource = mergeMethodology([...summaries, ...detailedSources]);
   const teamSizeCounts = new Map();
   for (const size of methodologySource.teamSizes || []) teamSizeCounts.set(size, (teamSizeCounts.get(size) || 0) + 1);
   const commonTeamSize = [...teamSizeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || null;
@@ -536,7 +581,8 @@ function methodologyColumns(payload) {
   const roles = Array.isArray(metadata.populationByRole) ? metadata.populationByRole : source.populationByRole || [];
   const roleText = roleOverride || (roles.length ? roles.slice().sort((a, b) => b.count - a.count || a.role.localeCompare(b.role, "ro")).map((item) => `${item.count} ${item.role}`).join(", ") : "");
   const client = text(metadata.clientName || metadata.projectName);
-  const population = roleText ? `${payload.participantCounts?.included ?? 0} participanți (${roleText})` : `${payload.participantCounts?.included ?? 0} participanți${client ? ` ${client}` : ""}`;
+  const composedPopulation = /^\d+\s+participanți(?:\s*\(.*\))?$/iu.test(roleOverride) ? roleOverride : "";
+  const population = composedPopulation || (roleText ? String(payload.participantCounts?.included ?? 0) + " participanți (" + roleText + ")" : String(payload.participantCounts?.included ?? 0) + " participanți" + (client ? " " + client : ""));
   const location = text(metadata.location) || (source.locations || []).join(", ");
   const exerciseList = text(metadata.exercises);
   const exerciseCount = text(metadata.exerciseCount) || (exerciseList ? String(exerciseList.split(/[;,]\s*|\n/u).filter((item) => text(item)).length) : "");
