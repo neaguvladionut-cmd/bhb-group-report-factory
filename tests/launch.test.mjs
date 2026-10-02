@@ -14,7 +14,8 @@ test("deploy is the source-owned one-page Romanian builder with the approved fou
   assert.equal(deploy, await readFile(resolve(root, "src/rebuild-index.html"), "utf8"));
   assert.match(deploy, /id="split-groups"/u);
   assert.match(deploy, /name="annex"/u);
-  assert.match(deploy, /evaluation-sheet-template\.csv/u);
+  assert.match(deploy, /șablon-declinații\.csv/u);
+  assert.doesNotMatch(deploy, /Context copertă|evaluation-sheet-template\.csv|Împărțire pe grupuri CODE/u);
   assert.match(deploy, /id="bundle"/u);
   assert.match(deploy, /id="download-fallback"/u);
   assert.equal((deploy.match(/class="workflow-section/g) || []).length, 4);
@@ -30,6 +31,7 @@ test("deploy is the source-owned one-page Romanian builder with the approved fou
   assert.match(app, /groupedIssues\(blockers, "blocker"\)/u);
   assert.match(app, /data-issue-search/u);
   assert.match(app, /Confirmă toate avertismentele/u);
+  assert.match(app, /data-back-step/u);
   assert.doesNotMatch(app, /PptxGenJS/u);
   assert.match(css, /\.issue-panel\{/u);
   assert.match(css, /\.issue-toggle/u);

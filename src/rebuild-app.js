@@ -26,11 +26,11 @@ function metadata() {
   const groupConclusions = {};
   $$(`[data-group-conclusion]`).forEach((input) => { (groupConclusions[input.dataset.groupConclusion] ||= {})[input.dataset.field] = input.value; });
   const slideToggles = Object.fromEntries($$(`[data-slide-toggle]`).map((input) => [input.dataset.slideToggle, input.checked]));
+  const value = (...ids) => ids.map((id) => $(`#${id}`)?.value).find((item) => text(item)) || "";
   return {
     projectName: $("#project-name")?.value || state.projectName,
     clientName: $("#client-name")?.value || "",
     reportDate: $("#report-date")?.value || state.reportDate || today(),
-    context: $("#report-context")?.value || "",
     program: $("#program")?.value || "Centru de Dezvoltare",
     exercises: $("#exercise-list")?.value || "",
     exerciseCount: $("#exercise-count")?.value || "",
@@ -41,8 +41,12 @@ function metadata() {
     conclusionsDevelopment: $("#conclusions-development")?.value || "",
     conclusionsInterventions: $("#conclusions-interventions")?.value || "",
     methodologyText: $("#methodology-text")?.value ?? "",
-    evaluators: $("#evaluators")?.value || "",
-    days: $("#days")?.value || "",
+    evaluators: value("proposal-evaluators", "evaluators"),
+    days: value("proposal-days", "days"),
+    teamSize: value("proposal-team-size", "team-size"),
+    evaluationPeriod: value("proposal-period", "evaluation-period"),
+    populationByRole: value("proposal-population", "population-role"),
+    location: value("proposal-location", "location"),
     benchmarkLow: $("#benchmark-low")?.value ?? "2.75",
     benchmarkHigh: $("#benchmark-high")?.value ?? "3.5",
     annex: document.querySelector(`input[name="annex"]:checked`)?.value || "end",
@@ -61,7 +65,7 @@ window.__grfDownload = download;
 
 function requiredFilesPresent() { const kinds = new Set((payload?.schemas || []).map((schema) => schema.kind)); return kinds.has("ac-summary-1-5") && kinds.has("ac-detailed-0-2"); }
 function warningComplete() { return Boolean(payload) && payload.warnings.every((item) => item.reviewed); }
-function ready(step) { if (step === 1) return files.length > 0; if (step >= 2) return Boolean(payload?.readiness && warningComplete()); return false; }
+function ready(step) { if (step === 1) return files.length > 0 && requiredFilesPresent() && Boolean(text(metadata().projectName)); if (step === 2) return Boolean(payload?.readiness && warningComplete()); if (step === 3) return Boolean(payload?.readiness && warningComplete()); return false; }
 function invalidate() { recompute(); }
 
 function deriveProjectName() {
@@ -70,9 +74,9 @@ function deriveProjectName() {
 }
 
 function friendlyKind(kind) { return { "ac-summary-1-5": "Export de sinteză", "ac-detailed-0-2": "Export detaliat", "devplan-descriptors": "Declinații", unsupported: "Fișier nerecunoscut" }[kind] || "Fișier"; }
-function sourceDates() { return [...new Set((payload?.schemas || []).flatMap((schema) => schema.methodology?.dates || []))].filter(Boolean); }
+function sourceDates() { return payload?.methodology?.dates || []; }
 function periodLabel() { const dates = sourceDates(); if (!dates.length) return "Nu apare în export"; if (dates.length === 1) return dates[0]; return `${dates[0]} – ${dates.at(-1)}`; }
-function addFieldListeners() { $$(`[data-derived-field]`).forEach((input) => input.addEventListener("change", recompute)); }
+function addFieldListeners() { $$(`[data-derived-field]`).forEach((input) => { if (input.dataset.listenerAttached) return; input.dataset.listenerAttached = "true"; input.addEventListener("input", () => { input.dataset.userEdited = "true"; }); input.addEventListener("change", recompute); }); }
 function renderFileCards() {
   const schemas = payload?.schemas || [];
   const matched = new Map(schemas.map((schema) => [schema.kind, schema]));
@@ -85,14 +89,18 @@ function renderFileCards() {
 }
 
 function renderFound() {
-  if (!payload || !files.length) { $("#found-panel")?.setAttribute("hidden", ""); return; }
+  if (!payload || !files.length) { $("#found-panel")?.setAttribute("hidden", ""); $("#derived-fields")?.replaceChildren(); return; }
   $("#found-panel")?.removeAttribute("hidden");
+  const method = payload.methodology || {};
+  const roles = (method.populationByRole || []).slice().sort((a, b) => b.count - a.count || a.role.localeCompare(b.role, "ro"));
+  const population = roles.length ? `${payload.participantCounts?.included ?? 0} participanți (${roles.map((item) => `${item.count} ${item.role}`).join(", ")})` : `${payload.participantCounts?.included ?? 0} participanți`;
+  const proposalChip = (value) => value ? "din export · de verificat" : "";
   const stats = [
     [payload.participantCounts?.included ?? 0, "participanți incluși"],
     [payload.competencies?.length ?? 0, "competențe"],
     [payload.behaviorAggregates?.length ?? 0, "comportamente"],
-    [payload.regionReadiness?.available ?? 0, "regiuni"],
-    [payload.codeReadiness?.available ?? 0, "grupuri"],
+    [method.evaluatorNames?.length || "Nu apare în export", "evaluatori distincti"],
+    [method.commonTeamSize || "Nu apare în export", "consultanți / participant"],
     [periodLabel(), "perioada evaluării"]
   ];
   const statsNode = $("#findings-stats");
@@ -101,15 +109,21 @@ function renderFound() {
   if (factsNode) factsNode.innerHTML = (payload.schemas || []).map((schema) => `<div class="source-fact"><strong>${esc(friendlyKind(schema.kind))}</strong><span>${esc(schema.sourceName)} · ${Math.max(0, schema.rows.length - schema.headerRow)} rânduri</span></div>`).join("");
   const values = metadata();
   const fields = [
-    ["project-name", "Proiect", "Numele propus pentru copertă.", values.projectName || state.projectName, "Apare în: copertă și numele fișierelor.", "din numele fișierului", "text"],
-    ["client-name", "Client", "Poți confirma numele folosit pe copertă.", values.clientName, "Apare în: copertă și titlul raportului.", "de confirmat de consultant", "text"],
+    ["project-name", "Nume proiect", "Numele proiectului apare pe copertă.", values.projectName || state.projectName, "Apare în: copertă și numele fișierelor.", "din numele fișierului", "text"],
+    ["client-name", "Client", "Numele clientului rămâne în metodologia raportului și în numele fișierelor.", values.clientName, "Apare în: metodologia raportului și numele fișierelor.", "de confirmat de consultant", "text"],
     ["report-date", "Data raportului", "Data propusă pentru livrare.", values.reportDate || today(), "Apare în: copertă și chitanță.", "propunere", "text"],
-    ["program", "Program", "Denumirea programului din livrare.", values.program || "Centru de Dezvoltare", "Apare în: copertă și titlul raportului.", "standard Trend", "text"],
-    ["report-context", "Context copertă", "O formulare scurtă, dacă este necesară.", values.context, "Apare în: copertă.", "opțional", "text"]
+    ["program", "Program", "Denumirea programului din livrare.", values.program || "Centru de Dezvoltare", "Apare în: copertă și metodologia raportului.", "standard Trend", "text"],
+    ["proposal-evaluators", "Evaluatori", "Numele distincte găsite în exporturile detaliate.", (method.evaluatorNames || []).join(", "), "Apare în: metodologia raportului.", proposalChip(method.evaluatorNames?.length), "text"],
+    ["proposal-team-size", "Echipa unui participant", "Cea mai frecventă echipă de evaluatori pentru un participant.", method.commonTeamSize || "", "Apare în: metodologia raportului.", proposalChip(method.commonTeamSize), "text"],
+    ["proposal-days", "Zile de evaluare", "Numărul de date distincte din coloana date.", method.dates?.length || "", "Apare în: metodologia raportului.", proposalChip(method.dates?.length), "text"],
+    ["proposal-period", "Perioada evaluării", "Prima și ultima dată găsite în coloana date.", periodLabel() === "Nu apare în export" ? "" : periodLabel(), "Apare în: metodologia raportului.", proposalChip(method.dates?.length), "text"],
+    ["proposal-population", "Participanți și roluri", "Rolurile sunt propuse din coloana Job.", population, "Apare în: metodologia raportului.", proposalChip(roles.length), "text"],
+    ["proposal-location", "Locația evaluării", "Locația este propusă din certification location.", (method.locations || []).join(", "), "Apare în: metodologia raportului.", proposalChip(method.locations?.length), "text"]
   ];
   const derived = $("#derived-fields");
-  if (derived) derived.innerHTML = fields.map(([id, label, help, value, where, source, type]) => `<div class="derived-field"><label for="${id}">${esc(label)}</label><p class="field-help">${esc(help)} Exemplu: ${esc(id === "report-date" ? today() : id === "program" ? "Centru de Dezvoltare" : id === "client-name" ? "PPC" : "Proiect Nord")}.</p><input id="${id}" data-derived-field="true" type="${type}" value="${esc(value)}" placeholder="${id === "client-name" ? "Exemplu: PPC" : "Completează dacă este necesar"}"><span class="source-chip">${esc(source)}</span><span class="field-where">${esc(where)}</span></div>`).join("");
+  if (derived) derived.innerHTML = fields.map(([id, label, help, value, where, source, type]) => `<div class="derived-field"><label for="${id}">${esc(label)}</label><p class="field-help">${esc(help)} Exemplu: ${esc(id === "report-date" ? today() : id === "program" ? "Centru de Dezvoltare" : id === "client-name" ? "Client sintetic" : id === "proposal-team-size" ? "3" : id === "proposal-days" ? "2" : "Proiect sintetic")}.</p><input id="${id}" data-derived-field="true" type="${type}" value="${esc(value)}" placeholder="${id === "client-name" ? "Exemplu: Client sintetic" : "Completează dacă este necesar"}">${source ? `<span class="source-chip">${esc(source)}</span>` : ""}<span class="field-where">${esc(where)}</span></div>`).join("");
   addFieldListeners();
+  [["evaluators", (method.evaluatorNames || []).join(", ")], ["days", method.dates?.length || ""], ["team-size", method.commonTeamSize || ""], ["evaluation-period", periodLabel() === "Nu apare în export" ? "" : periodLabel()], ["population-role", population], ["location", (method.locations || []).join(", ")]].forEach(([id, value]) => { const input = $(`#${id}`); if (input && !input.dataset.userEdited) input.value = value; });
 }
 
 function renderReview() {
@@ -118,7 +132,7 @@ function renderReview() {
   const overview = $("#review-overview");
   if (overview) overview.innerHTML = `<div class="review-state ${blockers.length || pending.length ? "needs-attention" : "all-clear"}"><strong>${blockers.length || pending.length ? "Mai este ceva de judecat" : "Totul este pregătit"}</strong><span>${blockers.length} blocaje · ${pending.length} avertismente · ${totalRows} rânduri citite</span></div><div class="review-stats"><div class="review-stat"><strong>${blockers.length}</strong><span>blocaje</span></div><div class="review-stat"><strong>${pending.length}</strong><span>avertismente de confirmat</span></div><div class="review-stat"><strong>${payload.participantCounts?.included ?? 0}</strong><span>participanți incluși</span></div><div class="review-stat"><strong>${payload.participantCounts?.excludedUnrated ?? 0}</strong><span>fără scor, excluși</span></div></div>`;
   root.replaceChildren();
-  const onConfirm = ({ group, title }) => { group.items.forEach((item) => state.acknowledged.add(warningKey(item))); announce(`Avertismentul ${title} a fost confirmat.`); renderReview(); sync(); $("#review-title")?.focus(); };
+  const onConfirm = ({ group, title }) => { group.items.forEach((item) => state.acknowledged.add(warningKey(item))); announce(`Avertismentul ${title} a fost confirmat.`); render(); $("#review-title")?.focus(); };
   groupedIssues(blockers, "blocker").forEach((group) => root.append(renderIssueGroup(group, { payload })));
   groupedIssues(pending, "warning").forEach((group) => root.append(renderIssueGroup(group, { payload, onConfirm })));
   if (!root.children.length) root.innerHTML = `<div class="review-state all-clear"><strong>Nu mai există blocaje sau avertismente de confirmat.</strong><span>Poți alege structura raportului.</span></div>`;
@@ -131,10 +145,11 @@ function groupOutlineSlides(plan) { const groups = []; const keys = [...new Set(
 function renderStructure() {
   const root = $("#structure-summary"); if (!root || !payload?.readiness) return;
   const plan = reportPlan(payload, { scope: "whole" }); const groups = groupOutlineSlides(plan); const annex = payload.metadata.annex; const mainCount = plan.filter((slide) => slide.deliverable !== "appendix" && !["conclusions", "close"].includes(slide.family)).length; const appendixCount = plan.filter((slide) => slide.deliverable === "appendix").length; const endCount = plan.filter((slide) => ["conclusions", "close"].includes(slide.family)).length;
-  $("#slide-total") && ($("#slide-total").textContent = `${plan.length} slide-uri`);
+  const slideLabel = (count) => `${count} ${count === 1 ? "slide" : "slide-uri"}`;
+  $("#slide-total") && ($("#slide-total").textContent = slideLabel(plan.length));
   root.parentElement.querySelectorAll(".structure-summary-note").forEach((node) => node.remove());
-  root.innerHTML = groups.map((group) => `<section class="outline-group"><h4>${esc(group.title)}<small>${group.slides.length} slide-uri · întregul proiect înaintea grupurilor</small></h4><span class="outline-count">${group.slides.length}</span><div class="outline-items">${group.slides.slice(0, 9).map((slide) => `<div class="outline-item"><span>${esc(outlineLabel(slide))}</span><span>${slide.number}</span></div>`).join("")}${group.slides.length > 9 ? `<div class="outline-item"><span>și alte secțiuni</span><span>${group.slides.length - 9}</span></div>` : ""}</div></section>`).join("");
-  root.insertAdjacentHTML("beforebegin", `<p class="field-where structure-summary-note">${plan.length} slide-uri: ${mainCount} principal · ${appendixCount} anexă · ${endCount} concluzii și încheiere. ${annex === "separate" ? "Anexa se descarcă separat, cu ambele nume de fișier afișate." : annex === "none" ? "Fără anexă: rezultatele individuale, analiza observațiilor și comportamentele cheie nu apar în livrare." : "Anexa rămâne la finalul raportului principal."}</p>`);
+  root.innerHTML = groups.map((group) => `<section class="outline-group"><h4>${esc(group.title)}<small>${slideLabel(group.slides.length)}</small></h4><span class="outline-count">${group.slides.length}</span><div class="outline-items">${group.slides.slice(0, 9).map((slide) => `<div class="outline-item"><span>${esc(outlineLabel(slide))}</span><span>${slide.number}</span></div>`).join("")}${group.slides.length > 9 ? `<div class="outline-item"><span>și alte secțiuni</span><span>${group.slides.length - 9}</span></div>` : ""}</div></section>`).join("");
+  root.insertAdjacentHTML("beforebegin", `<p class="field-where structure-summary-note">${slideLabel(plan.length)}: ${mainCount} principal · ${appendixCount} anexă · ${endCount} concluzii și încheiere. ${annex === "separate" ? "Anexa se descarcă separat, cu ambele nume reale afișate." : annex === "none" ? "Fără anexă: rezultatele individuale, analiza observațiilor și comportamentele cheie nu apar în livrare." : "Anexa rămâne înaintea concluziilor în raportul principal."}</p>`);
 }
 
 function codeGroupSummary() {
@@ -152,10 +167,12 @@ function guardControls() {
 
 function sync() {
   document.body.dataset.workflowStep = String(state.step);
-  const allowed = files.length ? payload?.readiness ? 4 : 2 : 1;
+  const allowed = ready(3) ? 4 : ready(2) ? 3 : ready(1) ? 2 : 1;
+  if (state.step > allowed) state.step = allowed;
   $$(`[data-section]`).forEach((section) => { const number = Number(section.dataset.section); const unlocked = number <= allowed; section.classList.toggle("is-locked", !unlocked); section.classList.toggle("is-unlocked", unlocked && number > 1); section.classList.toggle("is-current", number === state.step); section.setAttribute("aria-disabled", String(!unlocked)); const body = section.querySelector(`[data-body="${number}"]`); if (body) body.hidden = !unlocked; });
-  $$(`#workflow-steps [data-step]`).forEach((link) => { const number = Number(link.dataset.step); const unlocked = number <= allowed; link.classList.toggle("active", number === state.step); link.classList.toggle("done", number < state.step); link.classList.toggle("locked", !unlocked); link.setAttribute("aria-disabled", String(!unlocked)); });
-  $("#to-step-2") && ($("#to-step-2").disabled = !files.length);
+  $$(`[data-section]`).forEach((section) => { section.hidden = Number(section.dataset.section) !== state.step; });
+  $$(`#workflow-steps [data-step]`).forEach((link) => { const number = Number(link.dataset.step); const unlocked = number <= allowed; link.classList.toggle("active", number === state.step); link.classList.toggle("done", number < state.step); link.classList.toggle("locked", !unlocked); link.setAttribute("aria-disabled", String(!unlocked)); link.setAttribute("aria-current", number === state.step ? "step" : "false"); });
+  $("#to-step-2") && ($("#to-step-2").disabled = !ready(1));
   $("#to-step-3") && ($("#to-step-3").disabled = !ready(2));
   $("#to-step-4") && ($("#to-step-4").disabled = !ready(3));
   const enabled = ready(3) && !state.busy; ["#xlsx", "#csv-template", "#bundle", "#pptx-whole", "#pptx-main", "#pptx-appendix"].forEach((selector) => { const button = $(selector); if (button) button.disabled = !enabled; });
@@ -163,7 +180,7 @@ function sync() {
   const chooseNote = $("#choose-note"); if (chooseNote) chooseNote.textContent = payload?.metadata?.annex === "none" ? "Fără anexă a fost aleasă; rezultatele individuale și analiza observațiilor dispar din livrare." : `${reportPlan && payload?.readiness ? reportPlan(payload, { scope: "whole" }).length : "—"} slide-uri după alegerile curente.`;
 }
 
-function renderDownload() { const time = $("#receipt-time"); if (time && state.receipts.length) time.textContent = state.receipts.at(-1).time; const receipt = $("#receipt"); if (receipt && state.receipts.length) receipt.innerHTML = state.receipts.map((item) => `<div class="receipt-entry"><strong>${esc(item.name)}</strong><span>${esc(item.kind)} · ${esc(item.detail)} · ${esc(item.time)}</span></div>`).join(""); }
+function renderDownload() { const time = $("#receipt-time"); const receipt = $("#receipt"); if (time) time.textContent = state.receipts.length ? state.receipts.at(-1).time : "Încă nu ai descărcat un fișier"; if (receipt) receipt.innerHTML = state.receipts.length ? state.receipts.map((item) => `<div class="receipt-entry"><strong>${esc(item.name)}</strong><span>${esc(item.kind)} · ${esc(item.detail)} · ${esc(item.time)}</span></div>`).join("") : "<p>După prima descărcare vei vedea aici numele exact, tipul livrării și numărul de slide-uri.</p>"; }
 function addReceipt(name, kind, detail) { const time = new Intl.DateTimeFormat("ro-RO", { dateStyle: "short", timeStyle: "short" }).format(new Date()); state.receipts.push({ name, kind, detail, time }); renderDownload(); announce(`${name} a fost pregătit pentru descărcare.`); }
 
 function render() {
@@ -175,21 +192,28 @@ function render() {
 }
 function recompute() { render(); }
 
-async function readSources(event) { const incoming = await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() }))); files = mergeSelectedFiles(files, incoming); state.acknowledged.clear(); state.corrections = { values: {} }; state.projectName = state.projectName || deriveProjectName(); state.reportDate = state.reportDate || today(); event.target.value = ""; render(); announce("Fișierele au fost citite. Verifică datele găsite și mergi la verificare."); $("#review-title")?.focus(); }
-function activateStep(number) { const allowed = files.length ? payload?.readiness ? 4 : 2 : 1; if (number > allowed) return; state.step = number; sync(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]} h2`)?.focus(); if (number > 1) document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]}`)?.scrollIntoView({ block: "start" }); }
+async function readSources(event) { const incoming = await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() }))); files = mergeSelectedFiles(files, incoming); state.acknowledged.clear(); state.corrections = { values: {} }; state.projectName = state.projectName || deriveProjectName(); state.reportDate = state.reportDate || today(); state.step = 1; event.target.value = ""; render(); announce("Fișierele au fost citite. Verifică ce am găsit și apoi mergi la verificare."); $("#found-title")?.focus(); }
+function activateStep(number) { const allowed = ready(3) ? 4 : ready(2) ? 3 : ready(1) ? 2 : 1; if (number > allowed) return; state.step = number; sync(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]} h2`)?.focus(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]}`)?.scrollIntoView({ block: "start" }); }
 
-function expectedNames(kind) { const name = slug(payload?.metadata?.projectName); return { whole: `raport-trend-${name}.pptx`, main: `raport-trend-principal-${name}.pptx`, appendix: `raport-trend-anexa-${name}.pptx`, bundle: `pachet-bhb-${name}.zip`, xlsx: `audit-raport-grup-${name}.xlsx`, "csv-template": "evaluation-sheet-template.csv" }; }
+function expectedNames(kind) { const name = slug(payload?.metadata?.projectName); return { whole: `raport-trend-${name}.pptx`, main: `raport-trend-principal-${name}.pptx`, appendix: `raport-trend-anexa-${name}.pptx`, bundle: `pachet-bhb-${name}.zip`, xlsx: `audit-raport-grup-${name}.xlsx`, "csv-template": `sablon-declinatii-${name}.csv` }; }
 async function createDownload(kind) {
-  if (state.busy || !ready(3)) return; state.busy = true; sync(); const names = expectedNames(kind); const status = $("#download-status"); try {
+  if (state.busy || !ready(3)) return; const trigger = document.activeElement; state.busy = true; sync(); const names = expectedNames(kind); const status = $("#download-status"); try {
     if (kind === "xlsx") { const bytes = XLSX.write(createAuditWorkbook(XLSX, payload), { type: "array", compression: true, bookType: "xlsx" }); download(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), names.xlsx); addReceipt(names.xlsx, "fișier de lucru", "audit calculat"); }
     else if (kind === "csv-template") { const bytes = XLSX.write(createEvaluationSheetTemplate(XLSX, payload), { type: "string", bookType: "csv" }); download(new Blob([bytes], { type: "text/csv;charset=utf-8" }), names["csv-template"]); addReceipt(names["csv-template"], "fișier de lucru", "șablon declinații"); }
     else if (kind === "bundle") { await downloadBundle(payload, names.bundle); addReceipt(names.bundle, "livrabil client", "Pachet BHB"); }
     else { const scope = kind === "main" ? "main" : kind === "appendix" ? "appendix" : "whole"; await downloadPptx(payload, names[kind] || names.whole, { scope }); const count = reportPlan(payload, { scope }).length; addReceipt(names[kind] || names.whole, "livrabil client", `${count} slide-uri`); }
     if (status) status.textContent = "Livrabilul a fost pregătit. Chitanța de mai jos a fost actualizată.";
-  } catch (error) { if (status) status.textContent = `Descărcarea nu a pornit: ${error.message || error}`; } finally { state.busy = false; sync(); }
+  } catch (error) { if (status) status.textContent = `Descărcarea nu a pornit: ${error.message || error}`; } finally { state.busy = false; sync(); trigger?.focus?.(); }
 }
 
-function resetSession() { files = []; payload = null; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; state.projectName = ""; state.reportDate = ""; state.receipts = []; state.previewOpen = false; $("#sources").value = ""; $("#reset-confirm").hidden = true; render(); announce("Sesiunea a fost curățată. Fișierele sursă nu au fost schimbate."); $("#upload-title")?.focus(); }
+function resetSession() {
+  files = []; payload = null; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; state.projectName = ""; state.reportDate = ""; state.receipts = []; state.previewOpen = false;
+  $("#sources").value = ""; $("#reset-confirm").hidden = true; $("#download-fallback").hidden = true; $("#preview") && ($("#preview").innerHTML = "");
+  ["benchmark-low", "benchmark-high"].forEach((id, index) => { const input = $(`#${id}`); if (input) input.value = index ? "3.5" : "2.75"; });
+  $$(`input[name="annex"]`).forEach((input) => { input.checked = input.value === "end"; }); $("#split-groups") && ($("#split-groups").checked = false);
+  ["evaluators", "days", "team-size", "evaluation-period", "population-role", "location"].forEach((id) => { const input = $(`#${id}`); if (input) { input.value = ""; delete input.dataset.userEdited; } });
+  render(); announce("Sesiunea a fost curățată. Fișierele sursă nu au fost schimbate."); $("#upload-title")?.focus();
+}
 
 $("#sources")?.addEventListener("change", readSources);
 $("#choose-files")?.addEventListener("click", () => $("#sources")?.click());
@@ -197,11 +221,12 @@ $("#drop-zone")?.addEventListener("dragover", (event) => { event.preventDefault(
 $("#drop-zone")?.addEventListener("dragleave", () => $("#drop-zone").classList.remove("is-dragging"));
 $("#drop-zone")?.addEventListener("drop", (event) => { event.preventDefault(); $("#drop-zone").classList.remove("is-dragging"); const input = $("#sources"); const transfer = event.dataTransfer; if (input && transfer?.files?.length) { const dt = new DataTransfer(); [...transfer.files].forEach((file) => dt.items.add(file)); input.files = dt.files; input.dispatchEvent(new Event("change", { bubbles: true })); } });
 $("#to-step-2")?.addEventListener("click", () => activateStep(2)); $("#to-step-3")?.addEventListener("click", () => activateStep(3)); $("#to-step-4")?.addEventListener("click", () => activateStep(4));
+$$(`[data-back-step]`).forEach((button) => button.addEventListener("click", () => activateStep(Number(button.dataset.backStep))));
 $("#confirm-all")?.addEventListener("click", () => { payload.warnings.forEach((item) => state.acknowledged.add(warningKey(item))); announce("Toate avertismentele au fost confirmate."); render(); $("#review-title")?.focus(); });
 $$(`#workflow-steps [data-step]`).forEach((link) => link.addEventListener("click", (event) => { event.preventDefault(); activateStep(Number(link.dataset.step)); }));
 $$(`[data-section]`).forEach((section) => section.addEventListener("click", (event) => { const anchor = event.target.closest("a[data-step]"); if (anchor) { event.preventDefault(); activateStep(Number(anchor.dataset.step)); } }));
 $("#split-groups")?.addEventListener("change", recompute); $("#benchmark-low")?.addEventListener("change", recompute); $("#benchmark-high")?.addEventListener("change", recompute); $$(`input[name="annex"]`).forEach((input) => input.addEventListener("change", () => { $$(`.option`).forEach((option) => option.classList.toggle("selected", option.querySelector("input")?.checked)); recompute(); }));
-$("#methodology-text")?.addEventListener("change", recompute); $("#evaluators")?.addEventListener("change", recompute); $("#days")?.addEventListener("change", recompute); $("#conclusions")?.addEventListener("change", recompute); $("#conclusions-destination")?.addEventListener("change", recompute);
+$("#methodology-text")?.addEventListener("change", recompute); ["evaluators", "days", "team-size", "evaluation-period", "population-role", "location"].forEach((id) => { const input = $(`#${id}`); input?.addEventListener("input", () => { input.dataset.userEdited = "true"; }); input?.addEventListener("change", recompute); }); $("#conclusions")?.addEventListener("change", recompute); $("#conclusions-destination")?.addEventListener("change", recompute);
 $("#preview-trigger")?.addEventListener("click", () => { state.previewOpen = !state.previewOpen; const root = $("#preview"); if (!root) return; root.hidden = !state.previewOpen; $("#preview-trigger").textContent = state.previewOpen ? "Ascunde structura slide-urilor" : "Vezi structura slide-urilor"; if (state.previewOpen && payload?.readiness) { mountPreview(root, payload, { scope: "whole" }); root.querySelector(".preview-stage")?.focus(); } });
 [["#xlsx", "xlsx"], ["#csv-template", "csv-template"], ["#csv-template-import", "csv-template"], ["#bundle", "bundle"], ["#pptx-whole", "whole"], ["#pptx-main", "main"], ["#pptx-appendix", "appendix"]].forEach(([selector, kind]) => $(selector)?.addEventListener("click", () => createDownload(kind)));
 $("#reset")?.addEventListener("click", () => { $("#reset-confirm").hidden = false; $("#reset-confirm-yes")?.focus(); }); $("#reset-confirm-yes")?.addEventListener("click", resetSession); $("#reset-cancel")?.addEventListener("click", () => { $("#reset-confirm").hidden = true; $("#reset")?.focus(); });
