@@ -57,6 +57,16 @@ test("deploy is the source-owned one-page Romanian builder with the approved fou
   for (const [, src] of scripts) if (src) await access(resolve(root, "deploy", src.split("?")[0]));
 });
 
+test("drawer methodology fields share the page-one proposal keys", async () => {
+  const source = await readFile(resolve(root, "src/rebuild-index.html"), "utf8");
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  for (const [id, key] of [["evaluators", "evaluators"], ["days", "days"], ["team-size", "teamSize"], ["evaluation-period", "evaluationPeriod"], ["population-role", "populationByRole"], ["location", "location"]]) {
+    assert.match(source, new RegExp(`id="${id}" data-proposal-key="${key}"`, "u"));
+    assert.match(app, new RegExp(`\["${id}", "${key}"\]`, "u"));
+  }
+  assert.match(app, /setProposal\(input\); recompute\(\)/u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
