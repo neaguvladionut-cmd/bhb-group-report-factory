@@ -120,6 +120,17 @@ function parseDetailed(schema, corrections = {}) {
     if (index > behaviorStart && groups[index]) currentCompetency = groups[index];
     if (index > behaviorStart && currentCompetency && behaviors[index]) columns.push({ index, competency: currentCompetency, subcompetency: subcompetencies[index], behavior: behaviors[index] });
   }
+  // F18 (ruling 2026-10-02): export artefacts are not client text. A leading score-scale annotation „(0-2)” is
+  // always removed; a trailing „ /TOKEN” only when every imported behaviour ends with the same token.
+  const trailing = columns.map((column) => column.behavior.match(/\s+\/([^\s/]+)$/u)?.[1] || null);
+  const sharedToken = trailing.length && trailing.every((token) => token && token === trailing[0]) ? trailing[0] : null;
+  for (const column of columns) {
+    column.behaviorRaw = column.behavior;
+    let clean = column.behavior.replace(/^\s*\(\s*0\s*[-–—]\s*2\s*\)\s*/u, "");
+    if (sharedToken) clean = clean.replace(new RegExp(`\\s+/${sharedToken.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u"), "");
+    column.behavior = clean.trim() || column.behavior;
+  }
+  columns.forEach((column, order) => { column.order = order; });
   if (nameIndex < 0 || assessmentIndex < 0 || behaviorStart < 0 || !columns.length) issue(issues, "blocker", "detailed-headers", "Lipsesc coloanele obligatorii pentru exportul AC detaliat.", undefined, { sourceName: schema.sourceName });
   const records = [];
   const behaviorRecords = [];
@@ -144,11 +155,11 @@ function parseDetailed(schema, corrections = {}) {
       if (!Number.isInteger(score) || score < 0 || score > 2) { issue(issues, "blocker", "detailed-score", `Scor invalid: sunt acceptate numai valorile întregi 0, 1 sau 2 pentru ${column.behavior}.`, rowNumber, details); continue; }
       if (!scores[column.competency]) scores[column.competency] = [];
       scores[column.competency].push(score);
-      behaviorRecords.push({ name, assessment, identity, code, region, competency: column.competency, subcompetency: column.subcompetency, behavior: column.behavior, score, rowNumber, source: schema.sourceName, sourceIndex: behaviorRecords.length });
+      behaviorRecords.push({ name, assessment, identity, code, region, competency: column.competency, subcompetency: column.subcompetency, behavior: column.behavior, behaviorRaw: column.behaviorRaw, score, rowNumber, source: schema.sourceName, sourceIndex: column.order, recordIndex: behaviorRecords.length });
     }
     records.push({ name, assessment, identity, code, region, scores, rowNumber, source: schema.sourceName });
   }
-  const behaviorCatalog = columns.filter((column, index, all) => all.findIndex((candidate) => candidate.competency === column.competency && candidate.behavior === column.behavior) === index).map((column) => ({ competency: column.competency, subcompetency: column.subcompetency || "", behavior: column.behavior }));
+  const behaviorCatalog = columns.filter((column, index, all) => all.findIndex((candidate) => candidate.competency === column.competency && candidate.behavior === column.behavior) === index).map((column) => ({ competency: column.competency, subcompetency: column.subcompetency || "", behavior: column.behavior, behaviorRaw: column.behaviorRaw, sourceIndex: column.order }));
   return { records, behaviorRecords, behaviorCatalog, competencies: [...new Set(columns.map(({ competency }) => competency))], issues };
 }
 
@@ -159,9 +170,9 @@ function parseDescriptors(schema) {
   const records = schema.rows.slice(schema.headerRow).filter((row) => row.some((value) => text(value))).map((row, offset) => {
     const rowNumber = schema.headerRow + offset + 1;
     const record = Object.fromEntries(EVAL_SHEET_HEADERS.map((name) => [name, text(row[indexes[name]])]));
-    if (!record.competency || !record.behavior) issue(issues, "warning", "descriptor-incomplete", "Rândul de declinații fără competență sau comportament este ignorat.", rowNumber, { sourceName: schema.sourceName });
+    if (!record.behavior) issue(issues, "warning", "descriptor-incomplete", "Rândul de declinații fără comportament este ignorat.", rowNumber, { sourceName: schema.sourceName });
     return { ...record, rowNumber, source: schema.sourceName };
-  }).filter((record) => record.competency && record.behavior);
+  }).filter((record) => record.behavior);
   return { records, issues };
 }
 
@@ -170,16 +181,19 @@ const scoreStats = (records, competency) => {
   return { competency, n: values.length, mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, min: values.length ? Math.min(...values) : null, median: median(values), max: values.length ? Math.max(...values) : null };
 };
 
-function descriptorFor(descriptors, competency, behavior, warnings) {
-  const behaviorText = exact(behavior);
-  const scoped = descriptors.filter((item) => folded(item.competency) === folded(competency) && exact(item.behavior) === behaviorText);
-  const unscoped = descriptors.filter((item) => exact(item.behavior) === behaviorText);
-  const candidates = scoped.length ? scoped : unscoped;
+// D315 / D314 scope: a CSV row that names a competency matches only within it; a row with a blank competency
+// matches on the behaviour text alone; more than one candidate falls back to the imported text with a warning.
+function descriptorFor(descriptors, competency, behavior, warnings, behaviorRaw = behavior) {
+  const texts = new Set([exact(behavior), exact(behaviorRaw)]);
+  const sameText = descriptors.filter((item) => texts.has(exact(item.behavior)));
+  const scoped = sameText.filter((item) => item.competency && folded(item.competency) === folded(competency));
+  const blank = sameText.filter((item) => !item.competency);
+  const candidates = scoped.length ? scoped : blank;
   if (candidates.length > 1) {
     warnings.push({ severity: "warning", code: "descriptor-ambiguous", message: `Declinația pentru „${behavior}” este ambiguă; se păstrează textul importat.`, sourceName: candidates.map((item) => item.source).join(", "), field: behavior, identity: key(competency, behavior), id: `descriptor-ambiguous:${key(competency, behavior)}` });
     return { score0: "", score2: "", descriptorSource: "fallback-ambiguous" };
   }
-  return candidates[0] ? { score0: candidates[0].objective_text_score_0, score2: candidates[0].objective_text_score_2, descriptorSource: candidates[0].source } : { score0: "", score2: "", descriptorSource: "fallback-import" };
+  return candidates[0] ? { score0: candidates[0].objective_text_score_0, score2: candidates[0].objective_text_score_2, scoreMinus1: candidates[0]["objective_text_score_-1"], score1: candidates[0].objective_text_score_1, descriptorSource: candidates[0].source } : { score0: "", score2: "", descriptorSource: "fallback-import" };
 }
 
 function behaviorAggregates(behaviorRecords, includedIdentities, descriptors, warnings) {
@@ -187,13 +201,13 @@ function behaviorAggregates(behaviorRecords, includedIdentities, descriptors, wa
   for (const row of behaviorRecords) {
     if (!includedIdentities.has(row.identity)) continue;
     const mapKey = `${row.competency}\u0000${row.behavior}`;
-    if (!grouped.has(mapKey)) grouped.set(mapKey, { competency: row.competency, subcompetency: row.subcompetency, behavior: row.behavior, values: [], sourceIndex: row.sourceIndex });
+    if (!grouped.has(mapKey)) grouped.set(mapKey, { competency: row.competency, subcompetency: row.subcompetency, behavior: row.behavior, behaviorRaw: row.behaviorRaw, values: [], sourceIndex: row.sourceIndex });
     grouped.get(mapKey).values.push(row.score);
   }
   return [...grouped.values()].map((item) => {
     const values = item.values;
-    const descriptor = descriptorFor(descriptors, item.competency, item.behavior, warnings);
-    return { competency: item.competency, subcompetency: item.subcompetency, behavior: item.behavior, n: values.length, sum: values.reduce((sum, value) => sum + value, 0), mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, pct0: values.length ? values.filter((value) => value === 0).length / values.length : 0, pct2: values.length ? values.filter((value) => value === 2).length / values.length : 0, score0: descriptor.score0, score2: descriptor.score2, descriptorSource: descriptor.descriptorSource, sourceIndex: item.sourceIndex };
+    const descriptor = descriptorFor(descriptors, item.competency, item.behavior, warnings, item.behaviorRaw);
+    return { behaviorRaw: item.behaviorRaw, sourceIndex: item.sourceIndex, competency: item.competency, subcompetency: item.subcompetency, behavior: item.behavior, n: values.length, sum: values.reduce((sum, value) => sum + value, 0), mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, pct0: values.length ? values.filter((value) => value === 0).length / values.length : 0, pct2: values.length ? values.filter((value) => value === 2).length / values.length : 0, score0: descriptor.score0, score2: descriptor.score2, descriptorSource: descriptor.descriptorSource, sourceIndex: item.sourceIndex };
   });
 }
 
@@ -253,7 +267,8 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const finalWarnings = warnings.map((item) => ({ ...item, reviewed: acknowledged.has(item.id) }));
   const groups = codeValues.map((code) => ({ code, name: code, records: records.filter((record) => record.code === code) }));
   const zoneCalculations = zones.flatMap((zone) => parsedSummary.competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) })));
-  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => ({ competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behavior, objective_text_score_0: "", "objective_text_score_-1": "", objective_text_score_1: "", objective_text_score_2: "" }));
+  // F20: after import the template lists every imported behaviour with the declined texts already known.
+  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => { const known = descriptorFor(descriptors, row.competency, row.behavior, [], row.behaviorRaw); return { competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behavior, objective_text_score_0: known.score0 || "", "objective_text_score_-1": known.scoreMinus1 || "", objective_text_score_1: known.score1 || "", objective_text_score_2: known.score2 || "" }; });
   return {
     calculationVersion: CALCULATION_VERSION,
     createdAt: new Date().toISOString(),
@@ -279,7 +294,7 @@ export function createAuditWorkbook(XLSX, payload) {
   add("Validare", [["Severitate", "Cod", "ID avertisment", "Revizuit", "Sursă", "Rând", "Identitate stabilă", "Câmp", "Mesaj"], ...[...payload.blockers, ...payload.warnings].map((item) => [item.severity, item.code, item.severity === "warning" ? item.id : "", item.severity === "warning" ? (item.reviewed ? "Da" : "Nu") : "", item.sourceName || "", item.rowNumber || "", item.identity || "", item.field || "", item.message])]);
   add("Date normalizate", [["Nume", "Cod evaluare", "CODE", "Regiune", "Identitate stabilă", "Sursă", "Rând", "Includere", ...payload.competencies], ...payload.auditRecords.map((record) => [record.name, record.assessment, record.code, record.region, record.identity, record.source, record.rowNumber, record.inclusion, ...payload.competencies.map((competency) => record.scores[competency] ?? "")])]);
   add("Calcule", [["Competență", "N", "Medie 1–5", "Min", "Mediană", "Max"], ...payload.calculations.map((item) => [item.competency, item.n, item.mean, item.min, item.median, item.max])]);
-  add("Comportamente", [["Competență", "Comportament", "N", "Sumă scoruri prezente", "Medie 0–2", "% scor 0", "% scor 2", "Descriptor scor 0", "Descriptor scor 2", "Sursă descriptor"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.n, item.sum, item.mean, item.pct0, item.pct2, item.score0, item.score2, item.descriptorSource])]);
+  add("Comportamente", [["Competență", "Comportament", "Text importat (brut)", "N", "Sumă scoruri prezente", "Medie 0–2", "% scor 0", "% scor 2", "Descriptor scor 0", "Descriptor scor 2", "Sursă descriptor"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.behaviorRaw || item.behavior, item.n, item.sum, item.mean, item.pct0, item.pct2, item.score0, item.score2, item.descriptorSource])]);
   add("Grupuri", [["CODE", "N", "Nume afișat"], ...payload.groups.map((group) => [group.code, group.records.length, payload.metadata.groupNames?.[group.code] || group.code])]);
   add("Zone", [["Regiune", "N", ...payload.competencies], ...payload.zones.map((zone) => [zone.region, zone.records.length, ...payload.competencies.map((competency) => scoreStats(zone.records, competency).mean ?? "")])]);
   add("Clasament", [["Competență", "Comportament", "Sumă", "N", "% scor 0", "% scor 2"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.sum, item.n, item.pct0, item.pct2])]);

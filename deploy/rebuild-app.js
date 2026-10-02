@@ -91,6 +91,7 @@ function sync() {
   $("#to-step-3") && ($("#to-step-3").disabled = !ready(2));
   $("#to-step-4") && ($("#to-step-4").disabled = !ready(3));
   const canExport = ready(4) && !state.busy;
+  if ($("#csv-template-import")) $("#csv-template-import").disabled = state.busy;
   ["#xlsx", "#csv-template", "#bundle", "#pptx-whole", "#pptx-main", "#pptx-appendix"].forEach((selector) => { if ($(selector)) $(selector).disabled = !canExport; });
   if ($("#pptx-whole")) $("#pptx-whole").hidden = payload?.metadata.annex === "separate";
   if ($("#pptx-appendix")) $("#pptx-appendix").hidden = payload?.metadata.annex !== "separate";
@@ -116,7 +117,7 @@ function render() {
 
 async function readSources(event) { files = mergeSelectedFiles(files, await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() })))); state.acknowledged.clear(); state.corrections = { values: {} }; event.target.value = ""; invalidate(); }
 async function createDownload(kind) {
-  if (!ready(4) || state.busy) return;
+  if (state.busy || (kind !== "csv-template" && !ready(4))) return;
   state.busy = true;
   sync();
   const slug = payload.metadata.projectName.replace(/[^a-z0-9]+/giu, "-") || "raport-grup";
@@ -139,6 +140,6 @@ $("#to-step-3")?.addEventListener("click", () => { state.step = 3; render(); });
 $("#to-step-4")?.addEventListener("click", () => { state.step = 4; render(); });
 $$(`[data-step]`).forEach((button) => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step <= state.step || ready(step - 1)) { state.step = step; render(); } }));
 $("#reset")?.addEventListener("click", () => { files = []; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; $("#sources").value = ""; render(); });
-[["#xlsx", "xlsx"], ["#csv-template", "csv-template"], ["#bundle", "bundle"], ["#pptx-whole", "whole"], ["#pptx-main", "main"], ["#pptx-appendix", "appendix"]].forEach(([selector, kind]) => $(selector)?.addEventListener("click", () => createDownload(kind)));
+[["#xlsx", "xlsx"], ["#csv-template", "csv-template"], ["#csv-template-import", "csv-template"], ["#bundle", "bundle"], ["#pptx-whole", "whole"], ["#pptx-main", "main"], ["#pptx-appendix", "appendix"]].forEach(([selector, kind]) => $(selector)?.addEventListener("click", () => createDownload(kind)));
 render();
 window.__grfBooted?.();
