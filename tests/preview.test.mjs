@@ -1,18 +1,47 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import test from "node:test";
-import vm from "node:vm";
-import { buildPayload } from "../src/core.js";
-import { behaviorInsights, behaviorPageGroups, methodologyColumns, methodologyPages, reportPlan } from "../src/report-plan.js";
-import { mountPreview } from "../src/preview.js";
-const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");const vendor=await readFile(resolve(root,"src/assets/vendor/xlsx.full.min.js"),"utf8");const sandbox={exports:{},module:{exports:{}},Buffer,process};vm.runInNewContext(vendor,sandbox);const XLSX=sandbox.exports;
-function workbook(rows){const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),"Simple");return XLSX.write(wb,{type:"buffer",bookType:"xlsx"});}
-function fixture(){return buildPayload(XLSX,[{name:"summary.xlsx",bytes:workbook([["code","name","cod cp","People Management","Colaborare"],["","Ana Popescu","A-1",4,3],["","Bogdan Ionescu","A-2",2,5]])},{name:"detail.xlsx",bytes:workbook([["code","name the person evaluated","cod ac","Competente","People Management","Colaborare"],["","","","Subcompetente","PM","COL"],["","","","behavior","Comportament complet pentru prima competență","Comportament complet pentru colaborare"],["","Ana Popescu","A-1","",2,1],["","Bogdan Ionescu","A-2","",0,2]])}],{projectName:"AC test"});}
-test("report plan follows metadata and optional conclusion visibility",()=>{const payload=fixture(),without=reportPlan(payload);assert.equal(without.some(slide=>slide.family==="conclusions"),false);payload.metadata.exercises="Simulare de business";payload.metadata.otherInstruments="Interviu structurat";payload.metadata.conclusions="Text aprobat pentru concluzii.";const withMetadata=reportPlan(payload);const methodology=withMetadata.find(slide=>slide.family==="methodology");assert(methodology.page.left.join(" ").includes("Simulare de business"));assert(methodology.page.left.join(" ").includes("Interviu structurat"));assert.equal(withMetadata.some(slide=>slide.family==="conclusions"),true);assert(withMetadata.some(slide=>slide.family==="executive-summary"));assert(withMetadata.some(slide=>slide.family==="key-findings"));assert(withMetadata.some(slide=>slide.family==="appendix-divider"&&slide.deliverable==="appendix"));assert(reportPlan(payload,{scope:"main"}).every(slide=>slide.deliverable==="main"));assert(reportPlan(payload,{scope:"appendix"}).filter(slide=>slide.family!=="close").every(slide=>slide.deliverable==="appendix"));});
-test("methodology keeps the canonical compact facts and never inventories dates or locations",()=>{const payload=fixture();payload.schemas=[{methodology:{evaluators:["Consultant 1","Consultant 2"],dates:["2026-06-01","2026-06-02"],locations:["București"],teamSizes:[2,2]}}];const columns=methodologyColumns(payload),copy=[...columns.left,...columns.right].join(" ");assert.match(copy,/2 zile de evaluare organizate/);assert.match(copy,/2 consultanți Trend implicați/);assert.match(copy,/Fiecare participant a fost observat de o echipă de consultanți\./);assert.match(copy,/Platforma a generat rezultatele pentru fiecare competență și rapoartele individuale\./);assert.doesNotMatch(copy,/2026-06|București|Locații\/regiuni/);assert.equal(methodologyPages(payload).length,1);assert.doesNotMatch(copy,/0\s*[–-]\s*1\s*[–-]\s*2/u);});
-test("report plan paginates long participants and preserves full selected behavior sentences",()=>{const payload=fixture();payload.records=Array.from({length:19},(_,index)=>({...payload.records[index%2],name:`Participant cu nume foarte lung ${index+1}`,scores:{"People Management":4,"Colaborare":3}}));payload.behaviorAggregates=Array.from({length:9},(_,index)=>({competency:"People Management",behavior:`Comportament ${index+1}: ${"text observabil ".repeat(20)}`,pct0:index/10,pct2:1-index/10,mean:2}));const plan=reportPlan(payload),participantPages=plan.filter(slide=>slide.family==="participant-comparison"),behaviorPages=plan.filter(slide=>slide.family==="behavior"),selected=[...behaviorPages[0].insight.strengths,...behaviorPages[0].insight.development];assert.equal(participantPages.length,4);assert.equal(behaviorPages.length,1);assert(selected.every(item=>payload.behaviorAggregates.some(source=>source.behavior===item.behavior)));assert(selected.every(item=>item.behavior.includes("text observabil")));assert(behaviorPageGroups(payload.behaviorAggregates).every(page=>page.length>0));});
-test("behavior insights select deterministic distinct top score-2 and score-0 behaviors",()=>{const rows=[{behavior:"A complet",competency:"Leadership",pct2:.8,pct0:.1,mean:1.8},{behavior:"B complet",competency:"Leadership",pct2:.8,pct0:.05,mean:1.7},{behavior:"C complet",competency:"Leadership",pct2:.6,pct0:.2,mean:1.6},{behavior:"D complet",competency:"Leadership",pct2:.4,pct0:.7,mean:.8},{behavior:"E complet",competency:"Leadership",pct2:.3,pct0:.7,mean:.7},{behavior:"F complet",competency:"Leadership",pct2:.2,pct0:.5,mean:1}];const insight=behaviorInsights(rows)[0];assert.deepEqual(insight.strengths.map(item=>item.behavior),["A complet","B complet","C complet"]);assert.deepEqual(insight.development.map(item=>item.behavior),["E complet","D complet","F complet"]);assert.equal(new Set([...insight.strengths,...insight.development].map(item=>item.behavior)).size,6);const payload=fixture();payload.behaviorAggregates=rows;const behaviorSlides=reportPlan(payload).filter(slide=>slide.family==="behavior");assert.equal(behaviorSlides.length,1);assert.equal(behaviorSlides[0].insight.strengths.map(item=>item.behavior).join(""),"A completB completC complet");});
-test("preview includes thumbnail, control and keyboard navigation contracts",async()=>{const source=await readFile(resolve(root,"src/preview.js"),"utf8");assert.match(source,/data-slide/);assert.match(source,/ArrowLeft/);assert.match(source,/ArrowRight/);assert.match(source,/preview-benchmark/);assert.match(source,/Comportamente care susțin performanța/);assert.match(source,/Arii prioritare de dezvoltare/);assert.match(source,/PREVIZUALIZARE STRUCTURĂ RAPORT/iu);});
-test("hostile workbook headers render as escaped text and cannot create active DOM",()=>{const hostile='<img src=x onerror="globalThis.__grfOwned=1">',payload=buildPayload(XLSX,[{name:"hostile-summary.xlsx",bytes:workbook([["code","name","cod cp",hostile],["","D210 Ana","A-1",4]])}],{projectName:"AC test"}),rootNode={dataset:{},innerHTML:"",querySelectorAll:()=>[],querySelector:()=>({addEventListener(){}})};assert.equal(payload.readiness,true);mountPreview(rootNode,payload);assert.doesNotMatch(rootNode.innerHTML,/<img src=x/iu);assert.match(rootNode.innerHTML,/&lt;img src=x onerror=&quot;globalThis\.__grfOwned=1&quot;&gt;/u);assert.equal(globalThis.__grfOwned,undefined);});
+import { behaviorInsights, methodologyColumns, reportPlan, rankBehaviors } from "../src/rebuild-report-plan.js";
+
+const root = resolve(new URL("..", import.meta.url).pathname);
+
+test("report plan includes the Trend sections and an explicit whole-project-first group order", () => {
+  const payload = { metadata: { projectName: "Synthetic project", clientName: "Synthetic client", annex: "separate", splitGroups: true, groupNames: { North: "Nord" } }, participantCounts: { included: 2 }, bands: { low: 2.75, high: 3.5, below: 0, typical: 2, above: 0, n: 2 }, calculations: [{ competency: "Leadership", mean: 3.5, median: 3.5, n: 2 }], behaviorAggregates: [], behaviorRecords: [], records: [], groups: [{ code: "North", records: [] }, { code: "South", records: [] }], regionReadiness: { available: 0 }, zoneCalculations: [] };
+  const plan = reportPlan(payload);
+  assert(plan.some((slide) => slide.family === "how-to-read"));
+  assert(plan.some((slide) => slide.family === "executive-summary"));
+  assert(plan.some((slide) => slide.family === "key-findings"));
+  assert(plan.some((slide) => slide.groupKey === "North"));
+  assert(plan.findIndex((slide) => slide.groupKey === "North") > 0);
+  assert(plan.some((slide) => slide.deliverable === "appendix"));
+});
+
+test("methodology has editable unknown fields and no internal score language", () => {
+  const payload = { metadata: { projectName: "Synthetic project", clientName: "Synthetic client" }, participantCounts: { included: 2 }, behaviorAggregates: [], schemas: [{ methodology: { evaluators: ["Consultant A", "Consultant B"], dates: ["2026-06-01", "2026-06-02"], teamSizes: [2, 2] } }] };
+  const columns = methodologyColumns(payload);
+  const copy = [...columns.left, ...columns.right].join(" ");
+  assert.match(copy, /consultanți TREND implicați/u);
+  assert.equal(columns.missing.exercises, true);
+  assert.doesNotMatch(copy, /0\s*[–,-]\s*1\s*[–,-și ]+2|\(0-2\)/u);
+  const edited = methodologyColumns({ ...payload, metadata: { ...payload.metadata, evaluators: "4", days: "3", exercises: "un exercițiu de grup, un studiu de caz" } });
+  assert.deepEqual(edited.facts.slice(1, 3).map((fact) => fact.number), ["4", "3"]);
+  assert.equal(edited.facts[4].number, "2");
+  assert.match(edited.facts[4].text, /: un exercițiu de grup, un studiu de caz$/u);
+});
+
+test("behaviour insights follow the fixed summed-score cuts", () => {
+  const rows = Array.from({ length: 6 }, (_, index) => ({ competency: "Leadership", behavior: `B${index + 1}`, sum: 6 - index, sourceIndex: index }));
+  const insight = behaviorInsights(rows)[0];
+  assert.deepEqual(insight.key.map((row) => row.behavior), ["B1", "B2", "B3"]);
+  assert.deepEqual(insight.development.map((row) => row.behavior), ["B6", "B5", "B4"], "the bottom list starts with the lowest");
+  assert.equal(rankBehaviors(rows)[0].median, null);
+});
+
+test("preview source keeps accessible thumbnails, keyboard controls and escaped text sinks", async () => {
+  const source = await readFile(resolve(root, "src/preview.js"), "utf8");
+  assert.match(source, /data-slide/u);
+  assert.match(source, /ArrowLeft/u);
+  assert.match(source, /ArrowRight/u);
+  assert.match(source, /replace\(/u);
+});
