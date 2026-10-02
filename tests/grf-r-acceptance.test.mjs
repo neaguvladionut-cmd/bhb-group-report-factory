@@ -320,3 +320,41 @@ print(json.dumps([sum(l)/len(l)/d for l in lines]))`, JSON.stringify({ png: join
     }
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+test("F53: zone region names (15–20 characters) render inside their bars at one size — no white label ink above a bar", async (t) => {
+  const soffice = await tool("soffice"); const pdftoppm = await tool("pdftoppm");
+  if (!soffice || !pdftoppm || !(await binaryCommandAvailable("python3"))) { t.skip("LibreOffice, Poppler or Python is unavailable"); return; }
+  const { createFixture: finalFixture } = await import("./fixtures/grf-r-insp7-fixture.mjs");
+  const source = finalFixture(XLSX, { regionNames: ["București-Ilfov", "Sud-Vest Oltenia", "Centru Transilvania", "Nord-Est Moldova"] });
+  const temp = await mkdtemp(join(tmpdir(), "grf-r-zone-"));
+  try {
+    const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: source.summary }, { name: "detail.xlsx", bytes: source.detailed }], { ...source.metadata, splitGroups: true }, {}, { acknowledgedWarningIds: [] });
+    const plan = reportPlan(payload); const generated = await generatedDeck(payload);
+    await writeFile(join(temp, "zone.pptx"), generated.bytes);
+    await run(soffice, ["--headless", "--convert-to", "pdf", "--outdir", temp, join(temp, "zone.pptx")], { timeout: 300000 });
+    for (const [index, item] of plan.entries()) {
+      if (item.family !== "zone") continue;
+      const rel = (await generated.zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`).async("string")).match(/Target="\.\.\/charts\/(chart\d+\.xml)"/u)[1];
+      const chart = await generated.zip.file(`ppt/charts/${rel}`).async("string");
+      assert.equal(new Set([...chart.matchAll(/<c:dLbls>[\s\S]*?<\/c:dLbls>/gu)].flatMap((block) => [...block[0].matchAll(/<a:defRPr\b[^>]*\bsz="(\d+)"/gu)].map((match) => match[1]))).size, 1, `slide ${index + 1}: one region-label size`);
+      await run(pdftoppm, ["-png", "-r", "100", "-f", String(index + 1), "-l", String(index + 1), join(temp, "zone.pdf"), join(temp, `z${index}`)]);
+      const file = (await readdir(temp)).find((name) => name.startsWith(`z${index}`) && name.endsWith(".png"));
+      const { stdout } = await run("python3", ["-c", `import json,sys
+from PIL import Image
+im=Image.open(sys.argv[1]).convert('RGB'); w,h=im.size
+x0,x1,y0,y1=int(w*0.08),int(w*0.97),int(h*0.10),int(h*0.80)
+spill=0
+for x in range(x0,x1):
+  top=None
+  for y in range(y0,y1):
+    r,g,b=im.getpixel((x,y))
+    if max(r,g,b)-min(r,g,b)>40 or max(r,g,b)<110: top=y; break
+  if top is None: continue
+  for y in range(y0,top):
+    r,g,b=im.getpixel((x,y))
+    if r>=252 and g>=252 and b>=252: spill+=1
+print(spill)`, join(temp, file)]);
+      assert.equal(Number(stdout.trim()), 0, `slide ${index + 1}: white region-label ink above a bar`);
+    }
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});

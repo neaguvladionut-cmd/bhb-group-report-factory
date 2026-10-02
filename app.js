@@ -1080,6 +1080,8 @@ function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], category
       const points = outsideLabels[index].map((point) => `<c:dLbl><c:idx val="${point}"/>${spPr}${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
       body = body.replace(/<c:dLbls>/u, `<c:dLbls>${points}`);
     }
+    // The sixth competency's colour is applied before the minimum labels, so those keep navy text (F55).
+    if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
     // F51: a score at the axis minimum (1.00) has no visible bar; its value label (outside the end) keeps it
     // distinguishable from a missing score.
     const atMinimum = axisMinimumLabels ? entry.values.map((value, point) => ({ value: roundChartValue(value), point })).filter(({ value }) => value !== null && value <= 1).map(({ point }) => point) : [];
@@ -1090,7 +1092,6 @@ function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], category
       body = existing ? body.replace(/<c:dLbls>/u, `<c:dLbls>${labels}`) : body.replace(/<c:cat>/u, `<c:dLbls>${labels}<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:cat>`);
     }
     if (index >= templateSeries.length && seriesColors[index]) body = setSeriesFill(body, seriesColors[index]);
-    if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
     return body;
   });
   let output = `${xml.slice(0, first)}${series.join("")}${xml.slice(last)}`;
@@ -1310,9 +1311,18 @@ function chartLayout(item, chartXml, slideXml, spec) {
     const plotBottom = frame.y + (layout.y + layout.h) * frame.cy; const room = (FOOTER_TOP - plotBottom) / PT - 8;
     const slot = layout.w * frame.cx / PT / Math.max(1, spec.data.categories.length) * 0.92;
     options.labelSize = fitLabels(spec.data.categories, { max: axisLabelSize(chartXml, "catAx"), width: slot, height: room, maxLines: 4 });
-    // F45: a bar too short for its rotated region name gets the name outside its end (above the bar), never over the axis.
-    const perUnit = layout.h * frame.cy / PT / 4; const nameSize = axisLabelSize(chartXml, "dLbls") / 100;
-    options.outsideLabels = spec.data.series.map((series) => series.values.map((value, index) => ({ value, index })).filter(({ value }) => value !== null && (Number(value) - 1) * perUnit < String(series.name).length * nameSize * 0.6 + 12).map(({ index }) => index));
+    // F53: ONE region-label size for every series, fitted to the bars: the vertical name must fit the bar's width
+    // (one line) and, where the bar is tall enough, its height; ≥ 10 pt. F45: a bar too short for its name at that
+    // size carries the name outside its end (above the bar), never over the axis.
+    const perUnit = layout.h * frame.cy / PT / 4; const plotWidth = layout.w * frame.cx / PT;
+    const count = Math.max(1, spec.data.series.length); const barWidth = plotWidth / Math.max(1, spec.data.categories.length) / (count + (count - 1) * 0.27 + 2.19);
+    const fitsInside = (name, value, size) => (Number(value) - 1) * perUnit >= String(name).length * size * 0.62 + 14;
+    let nameSize = Math.min(axisLabelSize(chartXml, "dLbls") / 100, Math.floor(barWidth * 0.8 / 1.25));
+    const points = spec.data.series.flatMap((series) => series.values.filter((value) => value !== null).map((value) => ({ name: series.name, value })));
+    while (nameSize > 10 && points.some((point) => !fitsInside(point.name, point.value, nameSize) && fitsInside(point.name, point.value, 10))) nameSize -= 1;
+    nameSize = Math.max(10, nameSize);
+    options.dataLabelSize = nameSize * 100;
+    options.outsideLabels = spec.data.series.map((series) => series.values.map((value, index) => ({ value, index })).filter(({ value }) => value !== null && !fitsInside(series.name, value, nameSize)).map(({ index }) => index));
   }
   return { options, slide };
 }

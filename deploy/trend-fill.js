@@ -353,6 +353,8 @@ export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], c
       const points = outsideLabels[index].map((point) => `<c:dLbl><c:idx val="${point}"/>${spPr}${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
       body = body.replace(/<c:dLbls>/u, `<c:dLbls>${points}`);
     }
+    // The sixth competency's colour is applied before the minimum labels, so those keep navy text (F55).
+    if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
     // F51: a score at the axis minimum (1.00) has no visible bar; its value label (outside the end) keeps it
     // distinguishable from a missing score.
     const atMinimum = axisMinimumLabels ? entry.values.map((value, point) => ({ value: roundChartValue(value), point })).filter(({ value }) => value !== null && value <= 1).map(({ point }) => point) : [];
@@ -363,7 +365,6 @@ export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], c
       body = existing ? body.replace(/<c:dLbls>/u, `<c:dLbls>${labels}`) : body.replace(/<c:cat>/u, `<c:dLbls>${labels}<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:cat>`);
     }
     if (index >= templateSeries.length && seriesColors[index]) body = setSeriesFill(body, seriesColors[index]);
-    if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
     return body;
   });
   let output = `${xml.slice(0, first)}${series.join("")}${xml.slice(last)}`;

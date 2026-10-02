@@ -95,8 +95,9 @@ export function csv() {
   L.push([c[2].name, "", c[2].beh[3][0], "Să iei inițiativa", "", "", "Ai luat inițiativa, fără să aștepți instrucțiuni"].map(q).join(","));
   return "﻿" + L.join("\r\n") + "\r\n";
 }
-export function createFixture(XLSX) {
-  const { summary, detailed } = rows();
+export function createFixture(XLSX, { regionNames = null } = {}) {
+  const { summary } = rows(); let { detailed } = rows();
+  if (regionNames) { const names = [...new Set(REGIONS.filter(Boolean))]; detailed = detailed.map((row, index) => index < 3 ? row : row.map((cell, column) => (column === 2 && names.includes(cell) ? regionNames[names.indexOf(cell) % regionNames.length] : cell))); }
   const book = (aoa) => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Sheet1"); return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }); };
   return { summary: book(summary), detailed: book(detailed), csv: new TextEncoder().encode(csv()), metadata: { projectName: "Proiect sintetic final", clientName: "Client sintetic final", annex: "end", splitGroups: true } };
 }

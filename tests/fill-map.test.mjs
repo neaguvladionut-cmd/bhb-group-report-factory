@@ -569,3 +569,18 @@ test("F50: missing detailed scores raise ONE grouped warning per source; F52: ev
     await selfCheckPptx(generated.zip);
   }
 });
+
+test("F55: minimum-value labels are navy on every chart, the sixth-competency (FF9D75) clone included", async () => {
+  const synthetic = { ...insp7Payload, records: insp7Payload.records.map((record, index) => (index === 0 ? { ...record, scores: Object.fromEntries(Object.keys(record.scores).map((key) => [key, 1])) } : record)) };
+  const generated = await deck(synthetic);
+  let sixth = 0;
+  for (const [index, item] of generated.plan.entries()) {
+    if (!["participant-mean", "participant-comparison", "competency-participants"].includes(item.family)) continue;
+    const [{ chart }] = await generated.chartsOf(index);
+    for (const label of chart.match(/<c:dLbl><c:idx val="\d+"\/><c:numFmt formatCode="0\.00"[\s\S]*?<\/c:dLbl>/gu) || []) {
+      assert.match(label, /<a:srgbClr val="003057"\/>/u); assert.doesNotMatch(label, /FF9D75/u);
+      if (item.recolor) sixth += 1;
+    }
+  }
+  assert(sixth > 0, "a sixth-competency chart with a 1.00 score was checked");
+});
