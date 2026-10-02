@@ -216,8 +216,9 @@ function fillCover(xml, item) {
 function fillHowToRead(xml, item) {
   xml = updateShape(xml, 93, (shape) => setParagraphs(shape, [[{ text: item.title, run: 0 }]]));
   const body = (shape, paragraphs) => { const rPr = regularRPr(shape); return fitText(setParagraphs(shape, paragraphs.map((text) => [{ text, rPr }]))); };
-  xml = updateShape(xml, 5, (shape) => body(shape, item.paragraphs.slice(0, 2)));
-  return updateShape(xml, 6, (shape) => body(shape, item.paragraphs.slice(2)));
+  const split = Math.ceil(item.paragraphs.length / 2);
+  xml = updateShape(xml, 5, (shape) => body(shape, item.paragraphs.slice(0, split)));
+  return updateShape(xml, 6, (shape) => body(shape, item.paragraphs.slice(split)));
 }
 function fillMethodology(xml, item) {
   xml = updateShape(xml, 5, (shape) => { const bold = boldRPr(shape); const regular = regularRPr(shape); return fitText(setParagraphs(shape, item.page.facts.map((fact) => [{ text: fact.number ? `${fact.number} ` : "", rPr: bold }, { text: fact.text, rPr: regular }]))); });
@@ -514,6 +515,8 @@ async function rebuildSlides(zip, plan) {
   zip.file(relsPath, rels);
   zip.file("ppt/presentation.xml", rebuildSections(presentation.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/u, `<p:sldIdLst>${plan.map((_, index) => `<p:sldId id="${256 + index}" r:id="rId${nextRel + index}"/>`).join("")}</p:sldIdLst>`), plan, source.sectionOfSlide));
   await updateCharts(zip, plan); await prunePackage(zip);
+  // F29: extended properties describe the generated deck, not the template.
+  if (zip.file("docProps/app.xml")) zip.file("docProps/app.xml", (await zip.file("docProps/app.xml").async("string")).replace(/<Slides>\d+<\/Slides>/u, `<Slides>${plan.length}</Slides>`).replace(/<Notes>\d+<\/Notes>|<TitlesOfParts>[\s\S]*?<\/TitlesOfParts>|<HeadingPairs>[\s\S]*?<\/HeadingPairs>/gu, ""));
 }
 export async function generateTrendPptx(payload, { scope = "whole" } = {}) {
   if (!window.JSZip) throw new Error("Lipsește biblioteca locală pentru pachetul PPTX.");
@@ -561,9 +564,12 @@ function layoutItem(entry, font) {
   const shapes = []; const texts = []; const margin = 24; const width = 1400; let y = margin;
   const textLines = (value, x, size, maxWidth, color = BHB.ink, lineHeight = size * 1.3) => { const lines = wrapText(font, value, size, maxWidth); lines.forEach((line, index) => texts.push({ line, x, y: y + size + index * lineHeight, size, color })); return lines.length * lineHeight; };
   // Caption strip (outside the item proper): title, scope and benchmark.
+  const captionStart = texts.length; const captionShapes = shapes.length;
   y += textLines(entry.item.title, margin, 30, width - 2 * margin, BHB.navy) + 6;
   y += textLines(`${entry.item.groupLabel ? `Grup: ${entry.item.groupLabel}` : "Întregul proiect"}${entry.item.low !== undefined ? ` · benchmark ${f2(entry.item.low)}–${f2(entry.item.high)}` : ""}${entry.subtitle ? ` · ${entry.subtitle}` : ""}`, margin, 18, width - 2 * margin, BHB.muted) + 16;
   shapes.push({ type: "rect", x: margin, y, w: width - 2 * margin, h: 2, fill: BHB.aqua }); y += 18;
+  texts.slice(captionStart).forEach((entryText) => { entryText.caption = true; }); shapes.slice(captionShapes).forEach((shape) => { shape.caption = true; });
+  const itemTop = y - margin; // the item proper starts here; the caption strip above is for the PDF page only
   if (entry.kind === "chart") {
     const labelWidth = 380; const plotX = margin + labelWidth + 16; const plotW = width - plotX - margin - 70; const [min, max] = entry.scale;
     const scaleX = (value) => plotX + (Math.max(min, Math.min(max, value)) - min) / (max - min) * plotW;
@@ -606,7 +612,12 @@ function layoutItem(entry, font) {
   y += margin;
   // Crop: the item's own bounds plus the 24 px margin (F15).
   const right = Math.max(...texts.map((entryText) => entryText.x + font.getAdvanceWidth(entryText.line, entryText.size)), ...shapes.map((shape) => shape.x + (shape.w || 0)), 0);
-  return { width: Math.ceil(Math.min(width, right + margin)), height: Math.ceil(y), shapes, texts };
+  return { width: Math.ceil(Math.min(width, right + margin)), height: Math.ceil(y), shapes, texts, itemTop: Math.floor(itemTop) };
+}
+/** F27: the PNG and SVG carry the item only; the caption strip stays on the PDF page and in the manifest. */
+function itemOnly(layout) {
+  const shift = layout.itemTop;
+  return { width: layout.width, height: layout.height - shift, shapes: layout.shapes.filter((shape) => !shape.caption).map((shape) => ({ ...shape, y: shape.y - shift, top: shape.top === undefined ? undefined : shape.top - shift })), texts: layout.texts.filter((entry) => !entry.caption).map((entry) => ({ ...entry, y: entry.y - shift })) };
 }
 function svgItem(layout, font) {
   const shapes = layout.shapes.map((shape) => shape.type === "band" ? `<rect x="${shape.x.toFixed(1)}" y="${shape.y.toFixed(1)}" width="${shape.w.toFixed(1)}" height="${shape.h.toFixed(1)}" fill="${BHB.band}"/>` : `<rect x="${shape.x.toFixed(1)}" y="${shape.y.toFixed(1)}" width="${Math.max(0, shape.w).toFixed(1)}" height="${shape.h.toFixed(1)}" fill="${shape.fill}"/>`);
@@ -620,8 +631,9 @@ export async function buildBundleArtifacts(XLSX, payload) {
   const manifest = []; const svg = []; const layouts = [];
   for (const entry of items) {
     const layout = layoutItem(entry, font); layouts.push(layout);
-    svg.push({ name: `SVG/${entry.id}-${entry.item.family}.svg`, content: svgItem(layout, font), width: layout.width, height: layout.height });
-    manifest.push({ id: entry.id, title: entry.item.title, family: entry.item.family, group: entry.item.groupKey || "whole-project", deckSlide: entry.item.number, width: layout.width, height: layout.height, sourceValues: entry.sourceValues.map(String) });
+    const image = itemOnly(layout);
+    svg.push({ name: `SVG/${entry.id}-${entry.item.family}.svg`, content: svgItem(image, font), width: image.width, height: image.height });
+    manifest.push({ id: entry.id, title: entry.item.title, family: entry.item.family, group: entry.item.groupKey || "whole-project", groupLabel: entry.item.groupLabel || "", benchmark: entry.item.low !== undefined ? `${f2(entry.item.low)}–${f2(entry.item.high)}` : "", caption: entry.subtitle || "", deckSlide: entry.item.number, width: image.width, height: image.height, pdfPage: { width: layout.width, height: layout.height }, sourceValues: entry.sourceValues.map(String) });
   }
   const workbook = XLSX.utils.book_new();
   for (const [index, entry] of items.entries()) {

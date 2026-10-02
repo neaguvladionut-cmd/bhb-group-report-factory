@@ -112,7 +112,24 @@ function render() {
   const preview = $("#preview");
   if (preview) { if (payload.readiness) mountPreview(preview, payload, { scope: "whole" }); else preview.innerHTML = "<p class=\"preview-empty\">Încarcă exporturile complete pentru a vedea structura raportului.</p>"; }
   renderReview();
+  guardControls();
   sync();
+}
+// F25: a control without data is unchecked, disabled and says why.
+function guardControls() {
+  if (!payload) return;
+  const zone = $(`[data-slide-toggle="zone"]`);
+  const imported = files.length > 0;
+  if (zone) { const missing = imported && !payload.regionReadiness.available; if (missing) zone.checked = false; zone.disabled = missing; zone.title = missing ? payload.regionReadiness.disabledReason : ""; setReason(zone, missing ? payload.regionReadiness.disabledReason : ""); }
+  const split = $("#split-groups");
+  if (split) { const missing = imported && !payload.codeReadiness.splitAvailable; if (missing) split.checked = false; split.disabled = missing; const reason = missing ? "Exportul are mai puțin de două valori CODE; împărțirea pe grupuri nu este disponibilă." : ""; split.title = reason; setReason(split, reason); }
+}
+function setReason(input, reason) {
+  const label = input.closest("label"); if (!label) return;
+  let note = label.querySelector(".control-reason");
+  if (!reason) { note?.remove(); return; }
+  if (!note) { note = document.createElement("small"); note.className = "control-reason"; label.append(note); }
+  note.textContent = reason;
 }
 
 async function readSources(event) { files = mergeSelectedFiles(files, await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() })))); state.acknowledged.clear(); state.corrections = { values: {} }; event.target.value = ""; invalidate(); }

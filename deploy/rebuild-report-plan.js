@@ -93,14 +93,17 @@ export const behaviorPageGroups = (rows) => pageGroups(rows, 6);
 
 const range = (low, high) => `${f2(low)}–${f2(high)}`;
 // §10a, approved standard text; the last sentence follows the annex setting.
-export function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end") {
+// F26: a sentence that explains a chart type is left out when that chart type is toggled off.
+export function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end", toggles = {}) {
+  const on = (key) => toggles[key] !== false;
   const last = annex === "none" ? "Rezultatele descriu grupul evaluat." : `Rezultatele descriu grupul evaluat. Rezultatele individuale se regăsesc ${annex === "separate" ? "în anexa transmisă separat" : "în anexă"}.`;
+  const second = ["Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme.", on("range") ? "Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților." : ""].filter(Boolean).join(" ");
+  const keyFindings = on("keyFindings") && on("observation");
+  const third = keyFindings || on("behavior") ? ["Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate.", keyFindings ? "Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat." : ""].filter(Boolean).join(" ") : "";
   return [
     `Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim. Banda gri din grafice marchează intervalul de referință (benchmark) de ${range(low, high)}, care corespunde unei performanțe la nivel mediu în evaluările TREND: rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie.`,
-    "Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme. Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților.",
-    "Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate. Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat.",
-    last
-  ];
+    second, third, last
+  ].filter(Boolean);
 }
 export const HOW_TO_READ = (low = 2.75, high = 3.5, annex = "end") => howToReadParagraphs(low, high, annex).join(" ");
 
@@ -278,7 +281,7 @@ export function reportPlan(payload, { scope = "whole" } = {}) {
   const year = text(metadata.reportDate).match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
   const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "main", ...data });
   add("cover", { title: `${client} – ${program}`, client, program, year });
-  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: howToReadParagraphs(payload.bands.low, payload.bands.high, annex) });
+  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: howToReadParagraphs(payload.bands.low, payload.bands.high, annex, toggles) });
   add("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) });
   add("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) });
   if (toggles.keyFindings !== false && toggles.observation !== false) competencyFindings(payload).forEach((finding) => add("key-findings", { ...finding, title: `Distribuția pe competențe – ${finding.competency}`, low: payload.bands.low, high: payload.bands.high }));

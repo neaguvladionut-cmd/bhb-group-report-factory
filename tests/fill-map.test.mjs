@@ -226,7 +226,8 @@ test("bundle (F15): one cropped item per chart and table, values equal to the de
   for (const [index, entry] of artifacts.manifest.items.entries()) {
     const svg = artifacts.svg[index].content;
     assert.match(svg, new RegExp(`width="${entry.width}" height="${entry.height}"`, "u"));
-    assert.deepEqual(boxes[index], [entry.width, entry.height]);
+    assert.deepEqual(boxes[index], [entry.pdfPage.width, entry.pdfPage.height]);
+    assert(entry.pdfPage.height > entry.height, "the PDF page adds the caption strip outside the item (F27)");
     assert(!(entry.width === 1600 && entry.height === 900));
     assert.doesNotMatch(svg, /<text|<image|href=|font-family|undefined|NaN/u);
     const slideIndex = entry.deckSlide - 1; assert.equal(split.plan[slideIndex].title, entry.title);
@@ -315,4 +316,23 @@ test("F23: sibling boxes share one size, and every title of a series has one siz
     });
     for (const [family, sizes] of Object.entries(series)) { assert.equal(new Set(sizes).size, 1, `${family} titles ${[...new Set(sizes)]}`); assert(sizes[0] >= titles[family][1] * 0.6 - 50, `${family} title ≥ 60 %`); }
   }
+});
+
+test("F27: PNG/SVG items carry no caption; F29: app.xml counts the generated slides; F26: how-to-read follows the toggles", async () => {
+  const payload = payloadOf(acceptance, { splitGroups: true });
+  const artifacts = await buildBundleArtifacts(XLSX, payload);
+  for (const [index, entry] of artifacts.manifest.items.entries()) {
+    const titlePaths = artifacts.layouts[index].texts.filter((text) => text.caption).length;
+    assert(titlePaths > 0);
+    const svgPaths = (artifacts.svg[index].content.match(/<path\b/gu) || []).length;
+    const itemTexts = artifacts.layouts[index].texts.filter((text) => !text.caption).length;
+    assert.equal(svgPaths, itemTexts, `SVG ${entry.id} holds only the item's text`);
+  }
+  const app = await split.zip.file("docProps/app.xml").async("string");
+  assert.match(app, new RegExp(`<Slides>${split.plan.length}</Slides>`, "u")); assert.doesNotMatch(app, /TitlesOfParts|<Notes>/u);
+  const off = reportPlan(payloadOf(acceptance, { slideToggles: { range: false, keyFindings: false, behavior: false } }));
+  const paragraphs = off.find((item) => item.family === "how-to-read").paragraphs.join(" ");
+  assert.doesNotMatch(paragraphs, /Graficele de distribuție|Abilitățile cheie|Procentele/u);
+  const on = reportPlan(payloadOf(acceptance)).find((item) => item.family === "how-to-read").paragraphs.join(" ");
+  assert.match(on, /Graficele de distribuție/u); assert.match(on, /Procentele indică/u);
 });
