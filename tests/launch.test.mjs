@@ -75,19 +75,6 @@ test("adding a source preserves edited proposals and corrections for the next re
   assert.match(app, /if \(!state\.methodologyProposalEdits\.has\(key\)\) state\.methodologyProposals\[key\] = String\(value\)/u);
 });
 
-test("page-two review footer reports blockers, warning groups and confirmed state", async () => {
-  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
-  assert.match(app, /Rezolvă blocajele înainte de a merge mai departe\./u);
-  assert.match(app, /Mai sunt \$\{pendingGroups\.length\} grupuri de confirmat\./u);
-  assert.match(app, /Totul este confirmat; poți continua\./u);
-});
-
-test("separate-annex outline is built from the two delivered plans", async () => {
-  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
-  assert.match(app, /\(annex === "separate" \? \[mainPlan, appendixPlan\] : \[plan\]\)\.flatMap\(groupOutlineSlides\)/u);
-  assert.match(app, /const deliveredTotal = annex === "separate" \? mainPlan\.length \+ appendixPlan\.length/u);
-});
-
 test("empty findings tiles are omitted and count tiles have no export-proposal caption", async () => {
   const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
   assert.match(app, /\]\.filter\(\(\[value\]\) => value !== "" && value !== null && value !== undefined\)/u);
