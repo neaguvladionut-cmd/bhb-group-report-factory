@@ -230,6 +230,19 @@ function behaviorAggregates(behaviorRecords, includedIdentities, descriptors, wa
 
 function sheet(XLSX, rows) { return XLSX.utils.aoa_to_sheet(rows.map((row) => row.map((value) => typeof value === "string" ? safe(value) : value))); }
 
+// F50/F56: repeated per-row warnings of one kind become ONE warning per source (count + list, truncated after ten in
+// the message); the full list stays on the warning (`pairs`) for the audit (F54).
+function groupWarnings(list, code, message, label) {
+  const output = list.filter((item) => item.code !== code);
+  const bySource = new Map();
+  for (const item of list.filter((entry) => entry.code === code)) { if (!bySource.has(item.sourceName)) bySource.set(item.sourceName, []); bySource.get(item.sourceName).push(item); }
+  for (const [source, items] of bySource) {
+    const pairs = items.map(label); const more = pairs.length > 10 ? ` și încă ${pairs.length - 10}` : "";
+    output.push({ severity: "warning", code, message: message(items.length, source, pairs.slice(0, 10).join("; "), more), sourceName: source, count: items.length, pairs, id: `${code}:${folded(source)}` });
+  }
+  return output;
+}
+
 export function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState = {}) {
   const schemas = files.map((file) => ({ ...detectSchema(XLSX, file.bytes, file.name), fingerprint: fingerprint(file.bytes) }));
   const blockers = [];
@@ -247,7 +260,8 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const parsedSummary = summary ? parseSummary(summary, corrections) : { records: [], competencies: [], issues: [] };
   const parsedDetailed = detailed ? parseDetailed(detailed, corrections) : { records: [], behaviorRecords: [], behaviorCatalog: [], competencies: [], issues: [] };
   blockers.push(...parsedSummary.issues.filter((item) => item.severity === "blocker"), ...parsedDetailed.issues.filter((item) => item.severity === "blocker"));
-  warnings.push(...parsedSummary.issues.filter((item) => item.severity === "warning"), ...parsedDetailed.issues.filter((item) => item.severity === "warning"));
+  warnings.push(...groupWarnings(parsedSummary.issues.filter((item) => item.severity === "warning"), "summary-unrated", (count, source, shown, more) => `Scoruri pe competență lipsă în ${source}: ${count} (participant – competență): ${shown}${more}. Valorile lipsă nu intră în calcule.`, (item) => `${item.identity ? item.message.replace(/ nu are scor pentru /u, " – ").replace(/; valoarea nu intră în calcule\.$/u, "") : item.message}`),
+    ...groupWarnings(parsedDetailed.issues.filter((item) => item.severity === "warning"), "region-missing", (count, source, shown, more) => `${count} participanți fără regiune în ${source}: ${shown}${more}. Rămân în proiect, dar nu apar pe slide-ul pe regiuni.`, (item) => item.message.replace(/ nu are regiune;.*$/u, "")));
   const descriptorParsed = descriptorSources.map(parseDescriptors);
   const descriptors = descriptorParsed.flatMap((result) => result.records);
   warnings.push(...descriptorParsed.flatMap((result) => result.issues));
@@ -321,6 +335,8 @@ export function createAuditWorkbook(XLSX, payload) {
   add("Surse", [["Fișier", "Tip detectat", "Foaie", "Rând header", "Amprentă"], ...payload.schemas.map((schema) => [schema.sourceName, schema.kind, schema.sheetName, schema.headerRow, schema.fingerprint])]);
   add("Validare", [["Severitate", "Cod", "ID avertisment", "Revizuit", "Sursă", "Rând", "Identitate stabilă", "Câmp", "Mesaj"], ...[...payload.blockers, ...payload.warnings].map((item) => [item.severity, item.code, item.severity === "warning" ? item.id : "", item.severity === "warning" ? (item.reviewed ? "Da" : "Nu") : "", item.sourceName || "", item.rowNumber || "", item.identity || "", item.field || "", item.message])]);
   add("Date normalizate", [["Nume", "Cod evaluare", "CODE", "Regiune", "Identitate stabilă", "Sursă", "Rând", "Includere", ...payload.competencies], ...payload.auditRecords.map((record) => [record.name, record.assessment, record.code, record.region, record.identity, record.source, record.rowNumber, record.inclusion, ...payload.competencies.map((competency) => record.scores[competency] ?? "")])]);
+  // F54: every grouped warning's full list (the UI message may truncate; the audit never does).
+  add("Lipsuri", [["Cod", "Sursă", "Element"], ...payload.warnings.filter((item) => Array.isArray(item.pairs)).flatMap((item) => item.pairs.map((pair) => [item.code, item.sourceName || "", pair]))]);
   add("Calcule", [["Competență", "N", "Medie 1–5", "Min", "Mediană", "Max"], ...payload.calculations.map((item) => [item.competency, item.n, item.mean, item.min, item.median, item.max])]);
   add("Comportamente", [["Competență", "Comportament", "Text importat (brut)", "N", "Sumă scoruri prezente", "Medie 0–2", "% scor 0", "% scor 2", "Descriptor scor 0", "Descriptor scor 2", "Sursă descriptor"], ...payload.behaviorAggregates.map((item) => [item.competency, item.behavior, item.behaviorRaw || item.behavior, item.n, item.sum, item.mean, item.pct0, item.pct2, item.score0, item.score2, item.descriptorSource])]);
   add("Grupuri", [["CODE", "N", "Nume afișat"], ...payload.groups.map((group) => [group.code, group.records.length, payload.metadata.groupNames?.[group.code] || group.code])]);

@@ -93,3 +93,23 @@ test("F37/F38/F40: unmatched CSV row warned with its row; CSV template keys on t
     if (token) assert(result.behaviorAggregates.every((row) => !row.behavior.endsWith("/XYZd")), "a uniform code is stripped from client text");
   }
 });
+
+test("F56/F54: missing regions and missing competency scores are one grouped warning each; the audit lists every item", () => {
+  const regions = payload.warnings.filter((item) => item.code === "region-missing");
+  const unrated = payload.warnings.filter((item) => item.code === "summary-unrated");
+  assert.equal(regions.length, 1); assert.equal(unrated.length, 1);
+  assert.match(regions[0].message, /^\d+ participanți fără regiune în /u); assert.equal(regions[0].pairs.length, regions[0].count);
+  assert.match(unrated[0].message, /^Scoruri pe competență lipsă în .*: 1 \(participant – competență\): Participant Sintetic \d\d – /u);
+  const audit = createAuditWorkbook(XLSX, payload);
+  const rows = XLSX.utils.sheet_to_json(audit.Sheets.Lipsuri, { header: 1 }).slice(1);
+  for (const warning of payload.warnings.filter((item) => Array.isArray(item.pairs))) assert.equal(rows.filter((row) => row[0] === warning.code).length, warning.pairs.length, `${warning.code}: every item in the audit`);
+  // F54: a long list is truncated in the warning but complete in the audit.
+  const many = Array.from({ length: 14 }, (_, index) => ({ name: `Test ${String(index + 1).padStart(2, "0")}`, id: `T-${index + 1}` }));
+  const summary = book([["CODE", "name", "cod cp", "A"], ...many.map((person) => ["", person.name, person.id, 3])]);
+  const detailed = book([["CODE", "name the person evaluated", "regiune", "cod ac", "Competente", "A", ""], ["", "", "", "", "Subcompetente", "S", "S"], ["", "", "", "", "behavior", "B1", "B2"], ...many.map((person, index) => ["", person.name, "R", person.id, "", index === 0 ? 2 : "", 1])]);
+  const result = buildPayload(XLSX, [{ name: "s.xlsx", bytes: summary }, { name: "d.xlsx", bytes: detailed }], { projectName: "Lipsuri" }, {}, {});
+  const blank = result.warnings.find((item) => item.code === "detailed-blank");
+  assert.equal(blank.count, 13); assert.match(blank.message, /și încă 3/u);
+  const lipsuri = XLSX.utils.sheet_to_json(createAuditWorkbook(XLSX, result).Sheets.Lipsuri, { header: 1 }).slice(1).filter((row) => row[0] === "detailed-blank");
+  assert.equal(lipsuri.length, 13, "the audit lists all 13 pairs");
+});
