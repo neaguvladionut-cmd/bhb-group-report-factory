@@ -2343,11 +2343,10 @@ function renderFound() {
     [method.evaluatorNames?.length || "", "evaluatori distincți"],
     [method.commonTeamSize || "", "consultanți / participant"],
     [method.dates?.length || "", "zile de evaluare"]
-  ];
+  ].filter(([value]) => value !== "" && value !== null && value !== undefined);
   const statsNode = $("#findings-stats");
-  if (statsNode) statsNode.innerHTML = stats.map(([value, label]) => `<div class="stat"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join("");
   const factsNode = $("#source-facts");
-  if (statsNode) statsNode.innerHTML = stats.map(([value, label]) => { const missing = value === "" || value === null || value === undefined; return "<div class=\"stat\"><strong>" + (missing ? "—" : esc(value)) + "</strong><span>" + esc(label) + "</span><small class=\"stat-caption\">" + (missing ? "Nu apare în export." : "Propunere din export.") + "</small></div>"; }).join("");
+  if (statsNode) statsNode.innerHTML = stats.map(([value, label]) => `<div class="stat"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join("");
   if (factsNode) factsNode.innerHTML = (payload.schemas || []).map((schema) => `<div class="source-fact"><strong>${esc(friendlyKind(schema.kind))}</strong><span>${esc(schema.sourceName)} · ${Math.max(0, schema.rows.length - schema.headerRow)} rânduri</span></div>`).join("");
   const defaults = {
     evaluators: (method.evaluatorNames || []).join(", "),

@@ -88,6 +88,13 @@ test("separate-annex outline is built from the two delivered plans", async () =>
   assert.match(app, /const deliveredTotal = annex === "separate" \? mainPlan\.length \+ appendixPlan\.length/u);
 });
 
+test("empty findings tiles are omitted and count tiles have no export-proposal caption", async () => {
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  assert.match(app, /\]\.filter\(\(\[value\]\) => value !== "" && value !== null && value !== undefined\)/u);
+  assert.match(app, /stats\.map\(\(\[value, label\]\) => `<div class="stat">/u);
+  assert.doesNotMatch(app, /stat-caption|Propunere din export\./u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
