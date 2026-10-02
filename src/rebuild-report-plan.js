@@ -13,7 +13,9 @@ export const medianOf = (values) => {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 export const overallMean = (record) => average(Object.values(record.scores || {}).filter(Number.isFinite));
-const band = (value, low, high) => value > high ? "above" : value < low ? "below" : "in";
+// F47: band decisions use the value as printed (2 decimals), never a float tail.
+export const printed = (value) => Math.round(value * 100) / 100;
+const band = (value, low, high) => { const shown = printed(value); return shown > high ? "above" : shown < low ? "below" : "in"; };
 
 export const TEMPLATE_SLIDES = {
   cover: 1, "how-to-read": 2, methodology: 2, "executive-summary": 21, "key-findings": 12,
@@ -226,7 +228,7 @@ export function viewForGroup(payload, group) {
   const records = payload.records.filter((record) => identities.has(record.identity));
   const competencies = payload.competencies || payload.calculations.map((item) => item.competency);
   const calculations = competencies.map((competency) => scoreStats(records, competency));
-  const overallScores = records.map(overallMean).filter(Number.isFinite);
+  const overallScores = records.map(overallMean).filter(Number.isFinite).map(printed);
   const bands = { ...payload.bands, below: overallScores.filter((score) => score < payload.bands.low).length, typical: overallScores.filter((score) => score >= payload.bands.low && score <= payload.bands.high).length, above: overallScores.filter((score) => score > payload.bands.high).length, n: overallScores.length };
   const zones = [...new Set(records.map((record) => record.region).filter(Boolean))].map((region) => ({ region, records: records.filter((record) => record.region === region) }));
   return { ...payload, records, participantCounts: { ...payload.participantCounts, included: records.length }, calculations, bands, behaviorAggregates: groupBehaviorAggregates(payload, identities), zones, zoneCalculations: zones.flatMap((zone) => competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) }))), regionReadiness: { available: zones.length, blank: records.filter((record) => !record.region).length, disabledReason: zones.length ? "" : "Nu există valori de regiune în exportul detaliat." } };

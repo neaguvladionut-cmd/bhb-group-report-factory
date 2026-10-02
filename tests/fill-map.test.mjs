@@ -527,3 +527,18 @@ test("behaviour lines carry no percentages: plain declined text or the imported 
   assert.doesNotMatch(whole.plan.find((item) => item.family === "how-to-read").paragraphs.join(" "), /Procentele/u);
 });
 
+
+const { createFixture: insp7Fixture } = await import("./fixtures/grf-r-insp7-fixture.mjs");
+const insp7Payload = payloadOf(insp7Fixture(XLSX), { splitGroups: true });
+const insp7Deck = await deck(insp7Payload);
+test("F47: overall means are sum/count; participants exactly at 2.75 and 3.50 count as in-band; executive summary equals t7", () => {
+  const means = insp7Payload.records.map((record) => { const values = Object.values(record.scores).filter(Number.isFinite); return values.reduce((a, b) => a + b, 0) / values.length; });
+  const edges = means.filter((mean) => Math.abs(mean - 2.75) < 1e-9 || Math.abs(mean - 3.5) < 1e-9);
+  assert(edges.length >= 2, "the fixture has participants exactly on the benchmark edges");
+  const expectedIn = means.filter((mean) => Math.round(mean * 100) / 100 >= 2.75 && Math.round(mean * 100) / 100 <= 3.5).length;
+  assert.equal(insp7Payload.bands.typical, expectedIn);
+  const summary = insp7Deck.plan.find((item) => item.family === "executive-summary").summary;
+  const table = insp7Deck.plan.find((item) => item.family === "benchmark" && !item.groupKey).table;
+  assert.deepEqual([summary.shares.above, summary.shares.in, summary.shares.below], [table.shares.above, table.shares.in, table.shares.below]);
+  for (const row of table.rows) if (Math.abs(row.value - 3.5) < 1e-9 || Math.abs(row.value - 2.75) < 1e-9) assert.equal(row.band, "in");
+});

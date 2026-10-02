@@ -271,7 +271,9 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const high = Number(metadata.benchmarkHigh ?? 3.5);
   if (!Number.isFinite(low) || !Number.isFinite(high) || low < 1 || high > 5 || low >= high) issue(blockers, "blocker", "benchmark-invalid", "Intervalul benchmark trebuie să fie între 1 și 5, cu pragul inferior mai mic decât pragul superior.");
   const calculations = parsedSummary.competencies.map((competency) => scoreStats(records, competency));
-  const overallScores = records.map((record) => Object.values(record.scores).reduce((sum, value, _, values) => sum + value / values.length, 0));
+  // F47: a mean is sum / count, and band decisions use the value as printed (2 decimals), so six 3.50s count as „in”.
+  const printed = (value) => Math.round(value * 100) / 100;
+  const overallScores = records.map((record) => { const values = Object.values(record.scores).filter(Number.isFinite); return values.length ? printed(values.reduce((sum, value) => sum + value, 0) / values.length) : null; }).filter((score) => score !== null);
   const bands = { low, high, below: overallScores.filter((score) => score < low).length, typical: overallScores.filter((score) => score >= low && score <= high).length, above: overallScores.filter((score) => score > high).length, n: overallScores.length };
   // F37: a CSV row that matches no imported behaviour is reported (row and text); its texts are not used.
   for (const record of descriptors) {

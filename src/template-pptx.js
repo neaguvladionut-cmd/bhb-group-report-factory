@@ -314,7 +314,7 @@ function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
   xml = updateShape(xml, tableId, (shape) => replaceTableRows(shape, rows.length ? rows : [setRowCells(white, ["", ""])]));
   return { xml, spans: bandSpans(frame, box, rows, bands) };
 }
-const bandOf = (low, high) => (value) => (value > high ? "above" : value < low ? "below" : "in");
+const bandOf = (low, high) => (value) => { const shown = Math.round(value * 100) / 100; return shown > high ? "above" : shown < low ? "below" : "in"; }; // F47
 function fillKeyFindings(xml, item) {
   const { low, high } = bandRange(item);
   const title = competencyTitle(xml, 21, item.competency, "", item); xml = title.xml;

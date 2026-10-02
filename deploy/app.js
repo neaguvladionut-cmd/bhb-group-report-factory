@@ -274,7 +274,9 @@ function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState 
   const high = Number(metadata.benchmarkHigh ?? 3.5);
   if (!Number.isFinite(low) || !Number.isFinite(high) || low < 1 || high > 5 || low >= high) issue(blockers, "blocker", "benchmark-invalid", "Intervalul benchmark trebuie să fie între 1 și 5, cu pragul inferior mai mic decât pragul superior.");
   const calculations = parsedSummary.competencies.map((competency) => scoreStats(records, competency));
-  const overallScores = records.map((record) => Object.values(record.scores).reduce((sum, value, _, values) => sum + value / values.length, 0));
+  // F47: a mean is sum / count, and band decisions use the value as printed (2 decimals), so six 3.50s count as „in”.
+  const printed = (value) => Math.round(value * 100) / 100;
+  const overallScores = records.map((record) => { const values = Object.values(record.scores).filter(Number.isFinite); return values.length ? printed(values.reduce((sum, value) => sum + value, 0) / values.length) : null; }).filter((score) => score !== null);
   const bands = { low, high, below: overallScores.filter((score) => score < low).length, typical: overallScores.filter((score) => score >= low && score <= high).length, above: overallScores.filter((score) => score > high).length, n: overallScores.length };
   // F37: a CSV row that matches no imported behaviour is reported (row and text); its texts are not used.
   for (const record of descriptors) {
@@ -344,7 +346,9 @@ const medianOf = (values) => {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 const overallMean = (record) => average(Object.values(record.scores || {}).filter(Number.isFinite));
-const band = (value, low, high) => value > high ? "above" : value < low ? "below" : "in";
+// F47: band decisions use the value as printed (2 decimals), never a float tail.
+const printed = (value) => Math.round(value * 100) / 100;
+const band = (value, low, high) => { const shown = printed(value); return shown > high ? "above" : shown < low ? "below" : "in"; };
 
 const TEMPLATE_SLIDES = {
   cover: 1, "how-to-read": 2, methodology: 2, "executive-summary": 21, "key-findings": 12,
@@ -557,7 +561,7 @@ function viewForGroup(payload, group) {
   const records = payload.records.filter((record) => identities.has(record.identity));
   const competencies = payload.competencies || payload.calculations.map((item) => item.competency);
   const calculations = competencies.map((competency) => scoreStats(records, competency));
-  const overallScores = records.map(overallMean).filter(Number.isFinite);
+  const overallScores = records.map(overallMean).filter(Number.isFinite).map(printed);
   const bands = { ...payload.bands, below: overallScores.filter((score) => score < payload.bands.low).length, typical: overallScores.filter((score) => score >= payload.bands.low && score <= payload.bands.high).length, above: overallScores.filter((score) => score > payload.bands.high).length, n: overallScores.length };
   const zones = [...new Set(records.map((record) => record.region).filter(Boolean))].map((region) => ({ region, records: records.filter((record) => record.region === region) }));
   return { ...payload, records, participantCounts: { ...payload.participantCounts, included: records.length }, calculations, bands, behaviorAggregates: groupBehaviorAggregates(payload, identities), zones, zoneCalculations: zones.flatMap((zone) => competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) }))), regionReadiness: { available: zones.length, blank: records.filter((record) => !record.region).length, disabledReason: zones.length ? "" : "Nu există valori de regiune în exportul detaliat." } };
@@ -693,7 +697,7 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
 
-Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,MIN_PARTICIPANT_LABEL_PT,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,topOrder,bottomOrder,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
+Object.assign(window.__grf||(window.__grf={}),{f2,pct,medianOf,overallMean,printed,TEMPLATE_SLIDES,TEMPLATE_TITLES,BUNDLE_FAMILIES,PARTICIPANT_START_CAPS,MIN_PARTICIPANT_LABEL_PT,A2_LABEL_COLUMN_IN,wrapLabel,labelChars,readableCapacity,participantsPerSlide,splitEqual,pageGroups,participantChartPageSize,participantComparisonPageSize,topOrder,bottomOrder,rankBehaviors,behaviorInsights,behaviorPageGroups,howToReadParagraphs,HOW_TO_READ,METHODOLOGY_PRINCIPLES,methodologyColumns,methodologyPages,unrankedCompetencies,executiveSummary,competencyFindings,viewForGroup,reportPlan});})();
 
 (()=>{
 // BP-GRF-R fill layer: writes plan data into the named shapes of a cloned Trend template slide
@@ -1411,7 +1415,7 @@ function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
   xml = updateShape(xml, tableId, (shape) => replaceTableRows(shape, rows.length ? rows : [setRowCells(white, ["", ""])]));
   return { xml, spans: bandSpans(frame, box, rows, bands) };
 }
-const bandOf = (low, high) => (value) => (value > high ? "above" : value < low ? "below" : "in");
+const bandOf = (low, high) => (value) => { const shown = Math.round(value * 100) / 100; return shown > high ? "above" : shown < low ? "below" : "in"; }; // F47
 function fillKeyFindings(xml, item) {
   const { low, high } = bandRange(item);
   const title = competencyTitle(xml, 21, item.competency, "", item); xml = title.xml;
