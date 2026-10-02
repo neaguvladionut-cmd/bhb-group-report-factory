@@ -28,14 +28,14 @@ export const participants = Array.from({ length: 20 }, (_, index) => {
     name: `Participant sintetic ${String(number).padStart(2, "0")}`,
     region: number <= 6 ? "București" : number <= 12 ? "Cluj-Napoca" : number <= 18 ? "Timișoara" : "",
     assessment: `SYN-${String(number).padStart(2, "0")}`,
-    score: number <= 12 ? 4 : number <= 19 ? 2 : 3
+    score: number <= 12 ? 4.25 : number <= 19 ? 2.25 : 3.25 // quarter-step decimals, as real summary exports carry
   };
 });
 
 export const behaviorRows = competencies.flatMap(({ name }) => longLabels[name].map((behavior, index) => ({ competency: name, subcompetency: `Subcompetență ${name.slice(0, 18)}`, behavior, index })));
 
 // Varies by behaviour so the shares of 2 and 0 differ between behaviours (key findings show distinct %).
-export const behaviourScore = (participant, participantIndex, row) => (participant.score * (row.index % 3 + 1) + Math.floor(participantIndex * (row.index + 2) / 3)) % 3;
+export const behaviourScore = (participant, participantIndex, row) => (Math.floor(participant.score) * (row.index % 3 + 1) + Math.floor(participantIndex * (row.index + 2) / 3)) % 3;
 
 export function fixtureRows() {
   const summaryHeaders = ["CODE", "name", "cod cp", ...competencies.map(({ name }) => name)];

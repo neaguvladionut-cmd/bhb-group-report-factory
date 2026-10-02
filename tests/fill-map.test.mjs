@@ -103,8 +103,10 @@ test("M5 key findings: table rows per scored participant, braces span their band
     assert.equal(text(getShape(xml, 21)), `Distribuția pe competențe – ${item.competency}`);
     const frame = getShape(xml, 6); const rows = tableRows(frame); const box = xfrmOf(frame);
     assert.equal(rows.length, payload.records.filter((record) => Number.isFinite(record.scores[item.competency])).length);
-    const values = rows.map((row) => decode([...row.matchAll(/<a:t>([^<]*)<\/a:t>/gu)].map((match) => match[1]).join("")));
-    assert.deepEqual(values, item.scores.map(f2));
+    const cells = rows.map((row) => (row.match(/<a:tc\b[\s\S]*?<\/a:tc>/gu) || []).map((cell) => decode([...cell.matchAll(/<a:t>([^<]*)<\/a:t>/gu)].map((match) => match[1]).join(""))));
+    assert.deepEqual(cells, item.ladder.map((entry) => [entry.name, f2(entry.value)]), "name beside its score, in sorted order");
+    // Hand-checked pairs from the fixture: participants 01–12 score 4.25, 13–19 score 2.25, 20 scores 3.25.
+    for (const [name, score] of [["Participant sintetic 01", "4.25"], ["Participant sintetic 13", "2.25"], ["Participant sintetic 20", "3.25"]]) assert(cells.some(([cellName, cellScore]) => cellName === name && cellScore === score), `${name} → ${score}`);
     let y = box.y; const spans = {};
     rows.forEach((row, rowIndex) => { const h = Number(row.match(/\bh="(\d+)"/u)[1]); const value = item.scores[rowIndex]; const key = value > item.high ? "above" : value < item.low ? "below" : "in"; spans[key] = spans[key] ? { ...spans[key], bottom: y + h } : { top: y, bottom: y + h }; y += h; });
     for (const [key, braceId, labelId] of [["above", 8, 11], ["in", 14, 16], ["below", 12, 13]]) {
@@ -487,4 +489,15 @@ test("F45: a zone bar too short for its name carries the name outside its end", 
       assert.match(series, new RegExp(`<c:dLbl><c:idx val="${point}"/>[\\s\\S]*?<c:dLblPos val="outEnd"/>`, "u"), `${item.regions[seriesIndex]} at ${value}`);
     }));
   }
+});
+
+test("t7 ladder: every participant's name sits beside their overall mean", () => {
+  const index = whole.plan.findIndex((item) => item.family === "benchmark");
+  const rows = tableRows(getShape(whole.slides[index], 2));
+  const cells = rows.map((row) => (row.match(/<a:tc\b[\s\S]*?<\/a:tc>/gu) || []).map((cell) => decode([...cell.matchAll(/<a:t>([^<]*)<\/a:t>/gu)].map((match) => match[1]).join(""))));
+  assert.equal(cells.length, 20);
+  assert(cells.every(([name, value]) => /^Participant sintetic \d\d$/u.test(name) && /^\d\.\d\d$/u.test(value)));
+  assert.deepEqual(cells.find(([name]) => name === "Participant sintetic 20"), ["Participant sintetic 20", "3.25"]);
+  const sizes = rows.map((row) => Number((row.match(/<a:tc\b[\s\S]*?<\/a:tc>/u)[0].match(/\ssz="(\d+)"/u) || [0, 0])[1]));
+  assert.equal(new Set(sizes).size, 1); assert(sizes[0] >= 900);
 });

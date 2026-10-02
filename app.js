@@ -517,10 +517,11 @@ function competencyFindings(payload) {
   const { low, high } = payload.bands;
   return byMeanDesc(scoredCalculations(payload)).map((item) => {
     const insight = insights.get(item.competency) || { key: [], development: [] };
-    const scores = payload.records.map((record) => record.scores?.[item.competency]).filter(Number.isFinite).sort((a, b) => b - a);
+    const ladder = payload.records.filter((record) => Number.isFinite(record.scores?.[item.competency])).map((record) => ({ name: record.name, value: record.scores[item.competency] })).sort((a, b) => b.value - a.value);
+    const scores = ladder.map((entry) => entry.value);
     const counts = { above: 0, in: 0, below: 0 }; scores.forEach((score) => { counts[band(score, low, high)] += 1; });
     return {
-      item, insight, competency: item.competency, mean: item.mean, median: medianOf(scores), scores, counts,
+      item, insight, competency: item.competency, mean: item.mean, median: medianOf(scores), scores, ladder, counts,
       // F41: fewer than two scored behaviours leave R5 nothing to rank; the slide drops its two R5 boxes.
       noRanking: !insight.key.length && !insight.development.length,
       strengths: insight.key.map((row) => behaviourLine(row, "score2", row.pct2)),
@@ -558,7 +559,7 @@ function viewForGroup(payload, group) {
 
 function benchmarkTable(view) {
   const { low, high } = view.bands;
-  const rows = view.records.map(overallMean).filter(Number.isFinite).sort((a, b) => b - a).map((value) => ({ value, band: band(value, low, high) }));
+  const rows = view.records.map((record) => ({ name: record.name, value: overallMean(record) })).filter((row) => Number.isFinite(row.value)).sort((a, b) => b.value - a.value).map((row) => ({ ...row, band: band(row.value, low, high) }));
   const counts = { above: 0, in: 0, below: 0 }; rows.forEach((row) => { counts[row.band] += 1; });
   const shares = { above: pct(counts.above, rows.length), in: pct(counts.in, rows.length), below: pct(counts.below, rows.length) };
   return { rows, counts, shares, low, high, competencyMeans: byMeanDesc(scoredCalculations(view)).map((item) => ({ competency: item.competency, mean: item.mean })) };
@@ -947,7 +948,7 @@ function setCellText(cellXml, value, { size = null } = {}) {
 }
 function setRowCells(rowXml, values, options = {}) {
   let index = 0;
-  return rowXml.replace(/<a:tc\b[^>]*>[\s\S]*?<\/a:tc>/gu, (cell) => { const value = values[index]; index += 1; return value === undefined ? cell : setCellText(cell, value, options); });
+  return rowXml.replace(/<a:tc\b[^>]*>[\s\S]*?<\/a:tc>/gu, (cell) => { const value = values[index]; const own = options.sizes?.[index] ? { size: options.sizes[index] } : options; index += 1; return value === undefined ? cell : setCellText(cell, value, own); });
 }
 const setRowHeight = (rowXml, height) => rowXml.replace(/(<a:tr\b[^>]*\bh=")\d+(")/u, `$1${Math.round(height)}$2`);
 const setRowId = (rowXml, value) => rowXml.replace(/(<a16:rowId\b[^>]*\bval=")\d+(")/u, `$1${value}$2`);
@@ -1360,15 +1361,23 @@ function bandSpans(frameXml, frameBox, rows, bands) {
   rows.forEach((row, index) => { const h = rowHeight(row); const key = bands[index]; if (!spans[key]) spans[key] = { top: y, bottom: y + h }; else spans[key].bottom = y + h; y += h; });
   return spans;
 }
-function fillScoreTable(xml, tableId, values, bandsOf, low, high) {
+/**
+ * Ladder table (t7, t12): one row per participant — name in the first column, score in the second (Vlad 2026-10-02).
+ * Names share one size across the table: the largest (≤ the cell size, ≥ 9 pt) at which every name wraps into its row.
+ */
+function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
   const frame = getShape(xml, tableId); const box = xfrmOf(frame);
   const templateRows = tableRows(frame);
   const total = templateRows.reduce((sum, row) => sum + rowHeight(row), 0);
   const grey = templateRows.find(isShadedRow) || templateRows[0]; const white = templateRows.find((row) => !isShadedRow(row)) || templateRows[0];
   const baseSize = Number(white.match(/\ssz="(\d+)"/u)?.[1] || 1600);
-  const layout = rowLayout(total, values.length, baseSize);
-  const bands = values.map((value) => bandsOf(value));
-  const rows = values.map((value, index) => setRowId(setRowHeight(setRowCells(bands[index] === "in" ? grey : white, ["", f2(value)], layout.size ? { size: layout.size } : {}), layout.height), 1000000 + index));
+  const layout = rowLayout(total, entries.length, baseSize);
+  const columnWidth = Number(frame.match(/<a:gridCol w="(\d+)"/u)?.[1] || box.cx / 2) / 12700 - 6;
+  const rowPoints = layout.height / 12700;
+  let nameSize = Math.min(layout.size || baseSize, baseSize);
+  while (nameSize > 900 && !entries.every((entry) => wrappedLines(entry.name, nameSize / 100, columnWidth) * nameSize / 100 * 1.15 <= rowPoints)) nameSize -= 50;
+  const bands = entries.map((entry) => bandsOf(entry.value));
+  const rows = entries.map((entry, index) => setRowId(setRowHeight(setRowCells(bands[index] === "in" ? grey : white, [entry.name || "", f2(entry.value)], { sizes: [nameSize, layout.size || null] }), layout.height), 1000000 + index));
   xml = updateShape(xml, tableId, (shape) => replaceTableRows(shape, rows.length ? rows : [setRowCells(white, ["", ""])]));
   return { xml, spans: bandSpans(frame, box, rows, bands) };
 }
@@ -1379,7 +1388,7 @@ function fillKeyFindings(xml, item) {
   const shift = title.lines > 1 ? title.lineHeight : 0;
   if (shift) xml = compressBelow(xml, [6, 19, 17, 20, 18], shift);
   const titleBox = xfrmOf(getShape(xml, 21)); const accent = setRPrColor(templateParagraphs(getShape(xml, 21))[0].rPrs.at(-1), TITLE_ACCENT);
-  const table = fillScoreTable(xml, 6, item.scores, bandOf(low, high), low, high); xml = table.xml;
+  const table = fillScoreTable(xml, 6, item.ladder, bandOf(low, high), low, high); xml = table.xml;
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
   xml = placeBrace(xml, 12, 13, table.spans.below, item.counts.below);
@@ -1423,7 +1432,7 @@ function competencyMeansBox(shape, rows) {
 function fillBenchmark(xml, item) {
   const { low, high } = bandRange(item); const table = item.table;
   xml = titleSuffix(xml, 21, item);
-  const filled = fillScoreTable(xml, 2, table.rows.map((row) => row.value), bandOf(low, high), low, high); xml = filled.xml;
+  const filled = fillScoreTable(xml, 2, table.rows, bandOf(low, high), low, high); xml = filled.xml;
   xml = placeBrace(xml, 8, 11, filled.spans.above, `${table.shares.above}%`);
   xml = placeBrace(xml, 14, 16, filled.spans.in, `${table.shares.in}%`);
   xml = placeBrace(xml, 12, 13, filled.spans.below, `${table.shares.below}%`);
@@ -1688,8 +1697,8 @@ function bundleContent(item) {
     const categories = spec.data.categories.map((category) => String(category).replace(/[\u200B-\u200D\u2060\uFEFF]/gu, ""));
     return { kind: "chart", categories, series, scale: percent ? [0, 1] : [1, 5], percent, sourceValues: [...categories, ...series.map((entry) => entry.name), ...series.flatMap((entry) => entry.values.map(chartValueText).filter(Boolean))] };
   }
-  if (item.family === "key-findings") { const rows = [["Scoruri", item.scores.map(f2).join("  ")], ...(item.noRanking ? [] : [["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]])]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.scores.map(f2), ...item.strengths, ...item.development] }; }
-  if (item.family === "benchmark") { const table = item.table; const rows = table.competencyMeans.map((row) => [row.competency, f2(row.mean)]); rows.push([`Peste ${f2(table.high)}`, `${table.shares.above}%`], [`Între ${f2(table.low)} – ${f2(table.high)}`, `${table.shares.in}%`], [`Sub ${f2(table.low)}`, `${table.shares.below}%`], ["Medii individuale", table.rows.map((row) => f2(row.value)).join("  ")]); return { kind: "table", rows, sourceValues: [...table.competencyMeans.flatMap((row) => [row.competency, f2(row.mean)]), `${table.shares.above}%`, `${table.shares.in}%`, `${table.shares.below}%`, ...table.rows.map((row) => f2(row.value))] }; }
+  if (item.family === "key-findings") { const rows = [...item.ladder.map((entry) => [entry.name, f2(entry.value)]), ...(item.noRanking ? [] : [["Abilități cheie – Puncte forte", item.strengths.join("\n")], ["Arii de dezvoltare", item.development.join("\n")]])]; return { kind: "table", subtitle: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, rows, sourceValues: [item.competency, f2(item.mean), f2(item.median), ...item.ladder.flatMap((entry) => [entry.name, f2(entry.value)]), ...item.strengths, ...item.development] }; }
+  if (item.family === "benchmark") { const table = item.table; const rows = table.competencyMeans.map((row) => [row.competency, f2(row.mean)]); rows.push([`Peste ${f2(table.high)}`, `${table.shares.above}%`], [`Între ${f2(table.low)} – ${f2(table.high)}`, `${table.shares.in}%`], [`Sub ${f2(table.low)}`, `${table.shares.below}%`], ...table.rows.map((row) => [row.name, f2(row.value)])); return { kind: "table", rows, sourceValues: [...table.competencyMeans.flatMap((row) => [row.competency, f2(row.mean)]), `${table.shares.above}%`, `${table.shares.in}%`, `${table.shares.below}%`, ...table.rows.flatMap((row) => [row.name, f2(row.value)])] }; }
   if (item.family === "behavior") { const count = Math.max(item.key.length, item.development.length); const rows = [["Abilități cheie", "Abilități de dezvoltat"], ...Array.from({ length: count }, (_, index) => [item.key[index] || "", item.development[index] || ""])]; return { kind: "table", header: true, rows, sourceValues: [...item.key, ...item.development] }; }
   return { kind: "table", rows: [], sourceValues: [] };
 }

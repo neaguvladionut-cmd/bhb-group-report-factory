@@ -12,7 +12,7 @@ export const competencies = [
   { name: "Inițiativă și asumarea responsabilității pentru rezultate", count: 3 }
 ];
 const regions = ["Nord-Est", "Vest", "Sud", "Centru"];
-const scoreSteps = [2, 3, 4, 5, 3, 2, 4, 3, 1, 4, 3, 5, 2];
+const scoreSteps = [2.25, 3.5, 4.25, 4.75, 3.25, 2.5, 4, 3.75, 1.5, 4.5, 3, 5, 2.75]; // quarter steps
 export const participants = Array.from({ length: 23 }, (_, index) => {
   const number = index + 1;
   return {

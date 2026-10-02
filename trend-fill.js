@@ -280,7 +280,7 @@ export function setCellText(cellXml, value, { size = null } = {}) {
 }
 export function setRowCells(rowXml, values, options = {}) {
   let index = 0;
-  return rowXml.replace(/<a:tc\b[^>]*>[\s\S]*?<\/a:tc>/gu, (cell) => { const value = values[index]; index += 1; return value === undefined ? cell : setCellText(cell, value, options); });
+  return rowXml.replace(/<a:tc\b[^>]*>[\s\S]*?<\/a:tc>/gu, (cell) => { const value = values[index]; const own = options.sizes?.[index] ? { size: options.sizes[index] } : options; index += 1; return value === undefined ? cell : setCellText(cell, value, own); });
 }
 export const setRowHeight = (rowXml, height) => rowXml.replace(/(<a:tr\b[^>]*\bh=")\d+(")/u, `$1${Math.round(height)}$2`);
 export const setRowId = (rowXml, value) => rowXml.replace(/(<a16:rowId\b[^>]*\bval=")\d+(")/u, `$1${value}$2`);

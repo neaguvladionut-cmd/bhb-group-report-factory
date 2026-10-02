@@ -189,10 +189,11 @@ export function competencyFindings(payload) {
   const { low, high } = payload.bands;
   return byMeanDesc(scoredCalculations(payload)).map((item) => {
     const insight = insights.get(item.competency) || { key: [], development: [] };
-    const scores = payload.records.map((record) => record.scores?.[item.competency]).filter(Number.isFinite).sort((a, b) => b - a);
+    const ladder = payload.records.filter((record) => Number.isFinite(record.scores?.[item.competency])).map((record) => ({ name: record.name, value: record.scores[item.competency] })).sort((a, b) => b.value - a.value);
+    const scores = ladder.map((entry) => entry.value);
     const counts = { above: 0, in: 0, below: 0 }; scores.forEach((score) => { counts[band(score, low, high)] += 1; });
     return {
-      item, insight, competency: item.competency, mean: item.mean, median: medianOf(scores), scores, counts,
+      item, insight, competency: item.competency, mean: item.mean, median: medianOf(scores), scores, ladder, counts,
       // F41: fewer than two scored behaviours leave R5 nothing to rank; the slide drops its two R5 boxes.
       noRanking: !insight.key.length && !insight.development.length,
       strengths: insight.key.map((row) => behaviourLine(row, "score2", row.pct2)),
@@ -230,7 +231,7 @@ export function viewForGroup(payload, group) {
 
 function benchmarkTable(view) {
   const { low, high } = view.bands;
-  const rows = view.records.map(overallMean).filter(Number.isFinite).sort((a, b) => b - a).map((value) => ({ value, band: band(value, low, high) }));
+  const rows = view.records.map((record) => ({ name: record.name, value: overallMean(record) })).filter((row) => Number.isFinite(row.value)).sort((a, b) => b.value - a.value).map((row) => ({ ...row, band: band(row.value, low, high) }));
   const counts = { above: 0, in: 0, below: 0 }; rows.forEach((row) => { counts[row.band] += 1; });
   const shares = { above: pct(counts.above, rows.length), in: pct(counts.in, rows.length), below: pct(counts.below, rows.length) };
   return { rows, counts, shares, low, high, competencyMeans: byMeanDesc(scoredCalculations(view)).map((item) => ({ competency: item.competency, mean: item.mean })) };
