@@ -301,3 +301,18 @@ test("C: methodology omits a consultant fact left empty instead of printing a nu
   assert(!lines.some((line) => /^consultanți|^zile|^exerciții/u.test(line)));
   assert.deepEqual(whole.plan[2].page.missingLabels, ["consultanți TREND implicați", "zile de evaluare", "număr de exerciții"]);
 });
+
+test("F23: sibling boxes share one size, and every title of a series has one size (≥ 60 % of the template)", () => {
+  const largest = (shape) => Math.max(0, ...[...shape.matchAll(/<a:rPr\b[^>]*\ssz="(\d+)"[^>]*>(?:(?!<\/a:r>)[\s\S])*?<a:t>[^<]/gu)].map((match) => Number(match[1])));
+  const siblings = { "how-to-read": [5, 6], methodology: [5, 6], "key-findings": [17, 18], benchmark: [4, 17] };
+  const titles = { "key-findings": [21, 3750], "competency-participants": [5, 3600], behavior: [3, 3750] };
+  for (const generated of [whole, split, variedDeck]) {
+    const series = {};
+    generated.plan.forEach((item, index) => {
+      const xml = generated.slides[index];
+      if (siblings[item.family]) { const sizes = siblings[item.family].map((id) => largest(getShape(xml, id))).filter(Boolean); assert.equal(new Set(sizes).size, 1, `slide ${index + 1} ${item.family} siblings ${sizes}`); }
+      if (titles[item.family]) (series[item.family] ||= []).push(largest(getShape(xml, titles[item.family][0])));
+    });
+    for (const [family, sizes] of Object.entries(series)) { assert.equal(new Set(sizes).size, 1, `${family} titles ${[...new Set(sizes)]}`); assert(sizes[0] >= titles[family][1] * 0.6 - 50, `${family} title ≥ 60 %`); }
+  }
+});

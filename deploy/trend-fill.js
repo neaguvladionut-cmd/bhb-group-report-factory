@@ -207,13 +207,14 @@ export function singleLineWidth(paragraphXml, scale = 1) {
   return width * 12700;
 }
 /** A title on ONE line by explicit run size (down to minScale); else two lines at minScale. */
-export function fitTitleOneLine(shapeXml, { minScale = 0.6, scaleX = 1 } = {}) {
+export function fitTitleOneLine(shapeXml, { minScale = 0.6, scaleX = 1, forceScale = null } = {}) {
   const geometry = xfrmOf(shapeXml); const bodyPr = bodyPrOf(shapeXml);
   // 10 % reserve: renderers substitute fonts of different widths; a one-line title must stay on one line in both.
   const usable = (geometry.cx * scaleX - insetOf(bodyPr, "lIns", 91440) - insetOf(bodyPr, "rIns", 91440)) * 0.9;
   const paragraph = paragraphsOf(shapeXml)[0] || "";
   let scale = 1;
-  while (scale > minScale && singleLineWidth(paragraph, scale) > usable) scale = Math.round((scale - 0.025) * 1000) / 1000;
+  if (forceScale !== null) scale = forceScale;
+  else while (scale > minScale && singleLineWidth(paragraph, scale) > usable) scale = Math.round((scale - 0.025) * 1000) / 1000;
   scale = Math.max(minScale, scale);
   const lines = singleLineWidth(paragraph, scale) > usable ? 2 : 1;
   return { xml: setAutofit(scaleRunSizes(shapeXml, scale), ""), lines, scale, lineHeight: largestRunSize(shapeXml) / 100 * scale * 1.2 * 12700 };
