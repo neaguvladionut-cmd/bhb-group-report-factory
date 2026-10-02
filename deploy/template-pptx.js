@@ -307,10 +307,10 @@ function bandSpans(frameXml, frameBox, rows, bands) {
  * Ladder table (t7, t12): one row per participant — name in the first column, score in the second (Vlad 2026-10-02).
  * Names share one size across the table: the largest (≤ the cell size, ≥ 9 pt) at which every name wraps into its row.
  */
-function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
+function fillScoreTable(xml, tableId, entries, bandsOf, low, high, targetBottom = null) {
   const frame = getShape(xml, tableId); const box = xfrmOf(frame);
   const templateRows = tableRows(frame);
-  const total = templateRows.reduce((sum, row) => sum + rowHeight(row), 0);
+  const total = targetBottom === null ? templateRows.reduce((sum, row) => sum + rowHeight(row), 0) : Math.max(1, targetBottom - box.y);
   const grey = templateRows.find(isShadedRow) || templateRows[0]; const white = templateRows.find((row) => !isShadedRow(row)) || templateRows[0];
   const baseSize = Number(white.match(/\ssz="(\d+)"/u)?.[1] || 1600);
   const layout = rowLayout(total, entries.length, baseSize);
@@ -332,7 +332,8 @@ function fillKeyFindings(xml, item) {
   const shift = title.lines > 1 ? title.lineHeight : 0;
   if (shift) xml = compressBelow(xml, [6, 19, 17, 20, 18], shift);
   const titleBox = xfrmOf(getShape(xml, 21)); const accent = setRPrColor(templateParagraphs(getShape(xml, 21))[0].rPrs.at(-1), TITLE_ACCENT);
-  const table = fillScoreTable(xml, 6, item.ladder, bandOf(low, high), low, high); xml = table.xml;
+  const developmentBox = xfrmOf(getShape(xml, 18));
+  const table = fillScoreTable(xml, 6, item.ladder, bandOf(low, high), low, high, developmentBox.y + developmentBox.cy); xml = table.xml;
   xml = placeBrace(xml, 8, 11, table.spans.above, item.counts.above);
   xml = placeBrace(xml, 14, 16, table.spans.in, item.counts.in);
   xml = placeBrace(xml, 12, 13, table.spans.below, item.counts.below);

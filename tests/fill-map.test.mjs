@@ -531,6 +531,16 @@ test("behaviour lines carry no percentages: plain declined text or the imported 
 const { createFixture: insp7Fixture } = await import("./fixtures/grf-r-insp7-fixture.mjs");
 const insp7Payload = payloadOf(insp7Fixture(XLSX), { splitGroups: true });
 const insp7Deck = await deck(insp7Payload);
+test("E: key-findings ladder reaches the development-box bottom for 20 and 33 participants", () => {
+  for (const generated of [whole, insp7Deck]) {
+    const index = generated.plan.findIndex((item) => item.family === "key-findings" && !item.groupKey);
+    assert(index >= 0);
+    const ladder = getShape(generated.slides[index], 6); const development = getShape(generated.slides[index], 18);
+    const ladderBox = xfrmOf(ladder); const developmentBox = xfrmOf(development);
+    assert(Math.abs((ladderBox.y + ladderBox.cy) - (developmentBox.y + developmentBox.cy)) <= 0.05 * EMU + 1, "ladder bottom follows Arii de dezvoltare");
+    assert.equal(tableRows(ladder).length, generated.plan[index].ladder.length);
+  }
+});
 test("F47: overall means are sum/count; participants exactly at 2.75 and 3.50 count as in-band; executive summary equals t7", () => {
   const means = insp7Payload.records.map((record) => { const values = Object.values(record.scores).filter(Number.isFinite); return values.reduce((a, b) => a + b, 0) / values.length; });
   const edges = means.filter((mean) => Math.abs(mean - 2.75) < 1e-9 || Math.abs(mean - 3.5) < 1e-9);
