@@ -55,19 +55,41 @@ test("rule 1: every generated slide holds only its template slide's shapes plus 
   }
 });
 
-test("report order follows map §1: no duplicate key findings, t11 only as the annex divider, closing last", () => {
+// Section order as ruled by Vlad 2026-10-02 (template order): MAIN, ANEXĂ block, Concluzii, closing; each
+// section runs whole project first, then each group in place; per-person slides stay whole-project.
+const SECTION = { cover: "main", "how-to-read": "main", methodology: "main", "executive-summary": "main", "divider-results": "results", range: "results", ranking: "results", benchmark: "results", population: "results", zone: "results", "appendix-divider": "annex-open", "participant-mean": "annex-people", "participant-comparison": "annex-people", "divider-observations": "observations", "key-findings": "observations", "competency-participants": "observations-people", "divider-behaviors": "behaviours", behavior: "behaviours", "divider-conclusions": "conclusions", conclusions: "conclusions", close: "close" };
+const SECTION_ORDER = ["main", "results", "annex-open", "annex-people", "observations", "observations-people", "behaviours", "conclusions", "close"];
+function assertOrder(plan, label) {
+  const sections = plan.map((item) => SECTION_ORDER.indexOf(SECTION[item.family]));
+  sections.forEach((value, index) => assert(value >= 0 && (index === 0 || value >= sections[index - 1]), `${label}: slide ${index + 1} (${plan[index].family}) out of section order`));
+  for (const section of ["results", "observations", "behaviours", "conclusions"]) {
+    const scopes = plan.filter((item) => SECTION[item.family] === section).map((item) => item.groupKey || "");
+    const seen = []; scopes.forEach((scope) => { if (seen.at(-1) !== scope) { assert(!seen.includes(scope), `${label}: ${section} scope ${scope || "whole"} is not contiguous`); seen.push(scope); } });
+    if (seen.length) assert.equal(seen[0], "", `${label}: ${section} starts with the whole project`);
+  }
+  assert(plan.filter((item) => ["participant-mean", "participant-comparison", "competency-participants", "appendix-divider", "divider-observations"].includes(item.family)).every((item) => !item.groupKey));
+}
+test("section order follows the template: main, ANEXĂ block, Concluzii last, whole project then groups in place", async () => {
   const payload = payloadOf(acceptance, { splitGroups: true });
-  const families = split.plan.map((item) => item.family);
-  assert.deepEqual(families.slice(0, 4), ["cover", "how-to-read", "methodology", "executive-summary"]);
-  assert.equal(split.plan.filter((item) => item.family === "key-findings").length, payload.competencies.length);
-  assert.equal(split.plan.filter((item) => item.templateIndex === 12).length, payload.competencies.length);
-  assert(!families.includes("observation"));
-  assert.deepEqual(split.plan.filter((item) => item.templateIndex === 11).map((item) => item.family), ["appendix-divider"]);
-  assert.equal(families.at(-1), "close");
-  assert.deepEqual(split.slides.filter((xml) => /Constatări cheie|Observații ·/u.test(xml)), []);
-  const groupStart = split.plan.findIndex((item) => item.groupKey);
-  assert(split.plan.slice(0, groupStart).every((item) => !item.groupKey));
-  assert(split.plan.filter((item) => item.groupKey).every((item) => ["divider-results", "range", "ranking", "benchmark", "population", "zone", "divider-behaviors", "behavior", "divider-conclusions", "conclusions"].includes(item.family)));
+  for (const [label, generated] of [["whole/end", whole], ["split/end", split], ["varied split/end", variedDeck]]) {
+    assertOrder(generated.plan, label);
+    assert.equal(generated.plan.at(-1).family, "close"); assert.equal(generated.plan.at(-2).family, "conclusions");
+  }
+  assert.deepEqual(split.plan.slice(0, 4).map((item) => item.family), ["cover", "how-to-read", "methodology", "executive-summary"]);
+  assert.equal(split.plan.filter((item) => item.family === "key-findings").length, payload.competencies.length * 3, "key findings: whole, then NORD, then SUD");
+  assert.deepEqual(split.plan.filter((item) => item.templateIndex === 11).map((item) => item.family), ["appendix-divider", "divider-observations"]);
+  const observations = split.slides[split.plan.findIndex((item) => item.family === "divider-observations")];
+  assert.equal(text(getShape(observations, 8)), "Analiza observațiilor"); assert.equal(text(getShape(observations, 9)), "pe competențe");
+  for (const annex of ["separate", "none"]) {
+    const main = reportPlan(payloadOf(acceptance, { splitGroups: true, annex }), { scope: "main" });
+    assertOrder(main, `${annex}/main`);
+    assert(!main.some((item) => item.deliverable === "appendix" || ["key-findings", "behavior", "divider-observations"].includes(item.family)));
+    assert.equal(main.at(-2).family, "conclusions");
+  }
+  const appendix = reportPlan(payloadOf(acceptance, { splitGroups: true, annex: "separate" }), { scope: "appendix" });
+  assertOrder(appendix, "separate/appendix");
+  assert.equal(appendix[0].family, "cover"); assert.equal(appendix[1].family, "appendix-divider"); assert.equal(appendix.at(-1).family, "close");
+  assert(appendix.some((item) => item.family === "key-findings") && appendix.some((item) => item.family === "behavior"));
 });
 
 test("M1–M4: cover, how-to-read, methodology and executive summary fill their named shapes", () => {

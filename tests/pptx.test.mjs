@@ -82,7 +82,7 @@ test("generated Trend deck has one cloned output slide per plan item across conf
     for (const [index, item] of plan.entries()) {
       const xml = await generated.zip.file(slideNames[index]).async("string");
       const text = slideText(xml).join("").replace(/\s+/gu, " ");
-      if (!["appendix-divider", "how-to-read", "methodology"].includes(item.family)) assert(text.includes(item.title.replace(/\s+/gu, " ")), `slide ${index + 1} does not carry its title ${item.title}`);
+      if (!["appendix-divider", "divider-observations", "how-to-read", "methodology"].includes(item.family)) assert(text.includes(item.title.replace(/\s+/gu, " ")), `slide ${index + 1} does not carry its title ${item.title}`);
       assert.doesNotMatch(xml, /GRF-R role:/u);
     }
     await selfCheckPptx(generated.zip);

@@ -195,7 +195,7 @@ const competencyRuns = (shape, competency) => {
 };
 const withSuffix = (shape, item) => (groupSuffix(item) ? appendToLastRun(shape, groupSuffix(item)) : shape);
 export const TITLE_RULES = {
-  "key-findings": { id: 21, build: (shape, item) => competencyRuns(shape, item.competency) },
+  "key-findings": { id: 21, build: (shape, item) => competencyRuns(shape, `${item.competency}${groupSuffix(item)}`) },
   "competency-participants": { id: 5, build: (shape, item) => competencyRuns(shape, item.competency) },
   behavior: { id: 3, build: (shape, item) => appendToLastRun(shape, ` ${item.competency}${groupSuffix(item)}`) },
   range: { id: 3, build: withSuffix }, ranking: { id: 4, build: withSuffix }, benchmark: { id: 21, build: withSuffix },
@@ -416,6 +416,7 @@ function fillSlide(xml, item) {
     case "population": return fillPopulation(xml, item);
     case "behavior": return fillBehavior(xml, item);
     case "conclusions": return fillConclusions(xml, item);
+    case "divider-observations": return xml; // the template's own „Analiza observațiilor / pe competențe”
     case "appendix-divider": return fill(fill(xml, 8, [item.heading], { fit: false }), 9, [item.subheading], { fit: false });
     case "participant-mean": case "participant-comparison": return xml;
     case "competency-participants": { const title = competencyTitle(xml, 5, item.competency, "", item); return title.lines > 1 ? compressBelow(title.xml, [2, 3], title.lineHeight) : title.xml; }

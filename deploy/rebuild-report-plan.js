@@ -19,7 +19,7 @@ export const TEMPLATE_SLIDES = {
   cover: 1, "how-to-read": 2, methodology: 2, "executive-summary": 21, "key-findings": 12,
   "divider-results": 3, range: 4, ranking: 6, benchmark: 7, population: 8, zone: 10,
   "divider-behaviors": 18, behavior: 19, "divider-conclusions": 20, conclusions: 21,
-  "appendix-divider": 11, "participant-mean": 5, "participant-comparison": 9, "competency-participants": 13, close: 22
+  "appendix-divider": 11, "divider-observations": 11, "participant-mean": 5, "participant-comparison": 9, "competency-participants": 13, close: 22
 };
 // Fixed template titles (the template's own wording, whitespace-normalised).
 export const TEMPLATE_TITLES = {
@@ -33,6 +33,7 @@ export const TEMPLATE_TITLES = {
   "divider-conclusions": "Concluzii și Recomandări",
   conclusions: "Concluzii și recomandări",
   "participant-mean": "Distribuția rezultatelor – media pe competențe",
+  "divider-observations": "Analiza observațiilor – pe competențe",
   "participant-comparison": "Distribuția rezultatelor – pe competențe/ per participant",
   close: "MULȚUMIM!"
 };
@@ -247,13 +248,18 @@ function populationRows(view) {
   });
 }
 
-function addTemplateSection(slides, view, groupKey = "") {
+// Section builders (fill map §1 as amended by Vlad 2026-10-02: template order). Each runs for the whole project
+// first, then once per CODE group in place.
+function sectionContext(view, groupKey) {
   const groupLabel = groupKey ? text(view.metadata.groupNames?.[groupKey]) || groupKey : "";
   const suffix = groupKey ? ` · ${groupLabel}` : "";
   const toggles = view.metadata.slideToggles || {};
-  const on = (key) => toggles[key] !== false;
-  const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: `${TEMPLATE_TITLES[family] || ""}${suffix}`, groupKey, groupLabel, suffix, deliverable: "main", ...data });
-  const calculations = byMeanDesc(scoredCalculations(view));
+  return { groupLabel, suffix, on: (key) => toggles[key] !== false, calculations: byMeanDesc(scoredCalculations(view)) };
+}
+const pusher = (slides, groupKey, groupLabel, suffix, deliverable) => (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: `${TEMPLATE_TITLES[family] || ""}${suffix}`, groupKey, groupLabel, suffix, deliverable, ...data });
+function addResultsSection(slides, view, groupKey = "") {
+  const { groupLabel, suffix, on, calculations } = sectionContext(view, groupKey);
+  const add = pusher(slides, groupKey, groupLabel, suffix, "main");
   const results = [];
   if (on("range")) results.push(["range", { items: calculations }]);
   if (on("competencyMean")) results.push(["ranking", { items: calculations.slice().reverse() }]);
@@ -264,27 +270,38 @@ function addTemplateSection(slides, view, groupKey = "") {
     results.push(["zone", { regions, competencies: calculations.map((item) => item.competency), values: regions.map((region) => calculations.map((item) => (view.zoneCalculations || []).find((entry) => entry.region === region && entry.competency === item.competency)?.mean ?? null)) }]);
   }
   if (results.length) { add("divider-results"); results.forEach(([family, data]) => add(family, { ...data, low: view.bands.low, high: view.bands.high })); }
+}
+function addKeyFindings(slides, view, groupKey = "") {
+  const { groupLabel, suffix, on } = sectionContext(view, groupKey);
+  if (!on("keyFindings") || !on("observation")) return;
+  const add = pusher(slides, groupKey, groupLabel, suffix, "appendix");
+  competencyFindings(view).forEach((finding) => add("key-findings", { ...finding, title: `Distribuția pe competențe – ${finding.competency}${suffix}`, low: view.bands.low, high: view.bands.high }));
+}
+function addBehaviorSection(slides, view, groupKey = "") {
+  const { groupLabel, suffix, on, calculations } = sectionContext(view, groupKey);
   const insights = on("behavior") ? behaviorInsights(view.behaviorAggregates).filter((insight) => insight.key.length || insight.development.length) : [];
-  if (insights.length) {
-    add("divider-behaviors");
-    const order = new Map(calculations.map((item, index) => [item.competency, index]));
-    insights.sort((a, b) => (order.get(a.competency) ?? 99) - (order.get(b.competency) ?? 99)).forEach((insight) => add("behavior", { title: `Comportamente cheie – ${insight.competency}${suffix}`, competency: insight.competency, key: insight.key.map((row) => text(row.score2) || row.behavior), development: insight.development.map((row) => text(row.score0) || row.behavior) }));
-  }
-  if (on("conclusions")) {
-    add("divider-conclusions");
-    // F32: a group's conclusions slide uses that group's own fields; the whole project uses the project fields.
-    const own = groupKey ? view.metadata.groupConclusions?.[groupKey] || {} : { strengths: view.metadata.conclusionsStrengths, development: view.metadata.conclusionsDevelopment, interventions: view.metadata.conclusionsInterventions };
-    add("conclusions", { strengths: text(own.strengths), development: text(own.development), interventions: text(own.interventions) });
-  }
+  if (!insights.length) return;
+  const add = pusher(slides, groupKey, groupLabel, suffix, "appendix");
+  add("divider-behaviors");
+  const order = new Map(calculations.map((item, index) => [item.competency, index]));
+  insights.sort((a, b) => (order.get(a.competency) ?? 99) - (order.get(b.competency) ?? 99)).forEach((insight) => add("behavior", { title: `Comportamente cheie – ${insight.competency}${suffix}`, competency: insight.competency, key: insight.key.map((row) => text(row.score2) || row.behavior), development: insight.development.map((row) => text(row.score0) || row.behavior) }));
+}
+function addConclusionsSection(slides, view, groupKey = "") {
+  const { groupLabel, suffix, on } = sectionContext(view, groupKey);
+  if (!on("conclusions")) return;
+  const add = pusher(slides, groupKey, groupLabel, suffix, "main");
+  add("divider-conclusions");
+  // F32: a group's conclusions slide uses that group's own fields; the whole project uses the project fields.
+  const own = groupKey ? view.metadata.groupConclusions?.[groupKey] || {} : { strengths: view.metadata.conclusionsStrengths, development: view.metadata.conclusionsDevelopment, interventions: view.metadata.conclusionsInterventions };
+  add("conclusions", { strengths: text(own.strengths), development: text(own.development), interventions: text(own.interventions) });
 }
 
-function appendixSlides(payload) {
+function participantSlides(payload) {
   const slides = [];
   const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "appendix", low: payload.bands.low, high: payload.bands.high, ...data });
   const competencies = (payload.competencies || payload.calculations.map((item) => item.competency)).filter((competency) => payload.records.some((record) => Number.isFinite(record.scores?.[competency])));
   const participants = payload.records.map((record) => ({ name: record.name, mean: overallMean(record), scores: record.scores || {} })).filter((row) => Number.isFinite(row.mean)).sort((a, b) => b.mean - a.mean);
   const longestLabel = Math.max(0, ...participants.map((row) => labelChars(row.name)));
-  add("appendix-divider", { title: "Anexă – rezultate individuale", heading: "Anexă", subheading: "rezultate individuale" });
   // Rule 10 for A2: each name wraps (at spaces and after hyphens) inside a label column of ≤ 4.3 in; a slide holds as
   // many participants as keep every label ≥ 10 pt on its own rows, split into equal pages.
   const plotPoints = 0.9 * 9.25 * 72; const columnPoints = A2_LABEL_COLUMN_IN * 72;
@@ -311,28 +328,36 @@ function appendixSlides(payload) {
 }
 
 export function reportPlan(payload, { scope = "whole" } = {}) {
-  const slides = [];
   const metadata = payload.metadata || {};
   const annex = metadata.annex || "end";
-  const toggles = metadata.slideToggles || {};
   const client = text(metadata.clientName || metadata.projectName);
   const program = text(metadata.program) || "Centru de Dezvoltare";
   const year = text(metadata.reportDate).match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
-  const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "main", ...data });
-  add("cover", { title: `${client} – ${program}`, client, program, year });
-  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: [] });
-  add("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) });
-  add("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) });
-  if (toggles.keyFindings !== false && toggles.observation !== false) competencyFindings(payload).forEach((finding) => add("key-findings", { ...finding, title: `Distribuția pe competențe – ${finding.competency}`, low: payload.bands.low, high: payload.bands.high }));
-  addTemplateSection(slides, payload);
-  if (metadata.splitGroups && (payload.groups || []).length >= 2) payload.groups.forEach((group) => addTemplateSection(slides, viewForGroup(payload, group), group.code));
-  const appendix = annex === "none" ? [] : appendixSlides(payload);
-  const generated = new Set([...slides, ...appendix].map((slide) => slide.family));
-  slides.find((slide) => slide.family === "how-to-read").paragraphs = howToReadParagraphs(payload.bands.low, payload.bands.high, appendix.length ? annex : "none", generated);
-  const close = { family: "close", templateIndex: 22, title: "MULȚUMIM!", groupKey: "", deliverable: "main" };
+  const groups = metadata.splitGroups && (payload.groups || []).length >= 2 ? payload.groups.map((group) => [viewForGroup(payload, group), group.code]) : [];
+  const eachScope = (builder, target) => { builder(target, payload); groups.forEach(([view, code]) => builder(target, view, code)); };
+  const single = (family, data = {}, deliverable = "main") => ({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable, ...data });
+  // MAIN: cover, how to read, methodology, executive summary, „Distribuția rezultatelor” (whole, then groups).
+  const main = [single("cover", { title: `${client} – ${program}`, client, program, year }), single("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: [] }), single("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) }), single("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) })];
+  eachScope(addResultsSection, main);
+  // ANEXĂ: opener, per-person charts, „Analiza observațiilor” (key findings, then charts by participant), behaviours.
+  const annexBlock = [];
+  if (annex !== "none") {
+    const people = participantSlides(payload);
+    const findings = []; eachScope(addKeyFindings, findings);
+    const behaviours = []; eachScope(addBehaviorSection, behaviours);
+    const byPerson = people.filter((slide) => slide.family === "competency-participants");
+    annexBlock.push(single("appendix-divider", { title: "Anexă – rezultate individuale", heading: "Anexă", subheading: "rezultate individuale" }, "appendix"), ...people.filter((slide) => slide.family !== "competency-participants"));
+    if (findings.length || byPerson.length) annexBlock.push(single("divider-observations", {}, "appendix"), ...findings, ...byPerson);
+    annexBlock.push(...behaviours);
+  }
+  // END: „Concluzii și recomandări” (whole, then groups) — always the last section before the closing slide.
+  const end = []; eachScope(addConclusionsSection, end);
+  const generated = new Set([...main, ...annexBlock, ...end].map((slide) => slide.family));
+  main[1].paragraphs = howToReadParagraphs(payload.bands.low, payload.bands.high, annexBlock.length ? annex : "none", generated);
+  const close = single("close", { title: "MULȚUMIM!" });
   let selected;
-  if (scope === "main") selected = [...slides, close];
-  else if (scope === "appendix") selected = [{ ...slides[0], annexMark: true, deliverable: "appendix" }, ...appendix, { ...close, deliverable: "appendix" }];
-  else selected = [...slides, ...appendix, close];
+  if (scope === "main") selected = [...main, ...end, close];
+  else if (scope === "appendix") selected = [{ ...main[0], annexMark: true, deliverable: "appendix" }, ...annexBlock, { ...close, deliverable: "appendix" }];
+  else selected = [...main, ...annexBlock, ...end, close];
   return selected.map((slide, index) => ({ ...slide, number: index + 1, total: selected.length }));
 }
