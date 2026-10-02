@@ -283,3 +283,40 @@ print(json.dumps([b-a for a,b in merged]))`, JSON.stringify({ png: join(temp, fi
     }
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+test("F48: at 33 participants the ladder tables render at their set row height, so braces span their rows", async (t) => {
+  const soffice = await tool("soffice"); const pdftoppm = await tool("pdftoppm");
+  if (!soffice || !pdftoppm || !(await binaryCommandAvailable("python3"))) { t.skip("LibreOffice, Poppler or Python is unavailable"); return; }
+  const { createFixture: finalFixture } = await import("./fixtures/grf-r-insp7-fixture.mjs");
+  const source = finalFixture(XLSX);
+  const temp = await mkdtemp(join(tmpdir(), "grf-r-ladder-"));
+  try {
+    const payload = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: source.summary }, { name: "detail.xlsx", bytes: source.detailed }], { ...source.metadata, splitGroups: false }, {}, { acknowledgedWarningIds: [] });
+    const plan = reportPlan(payload); const generated = await generatedDeck(payload);
+    await writeFile(join(temp, "ladder.pptx"), generated.bytes);
+    await run(soffice, ["--headless", "--convert-to", "pdf", "--outdir", temp, join(temp, "ladder.pptx")], { timeout: 300000 });
+    const targets = [[plan.findIndex((item) => item.family === "benchmark"), 2], [plan.findIndex((item) => item.family === "key-findings"), 6]];
+    for (const [index, tableId] of targets) {
+      const slide = await generated.zip.file(`ppt/slides/slide${index + 1}.xml`).async("string");
+      const frame = slide.slice(slide.lastIndexOf("<p:graphicFrame", slide.indexOf(`<p:cNvPr id="${tableId}"`)));
+      const [fx, fy, fw, fh] = frame.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/u).slice(1).map((value) => Number(value) / 914400);
+      const rows = (frame.slice(0, frame.indexOf("</p:graphicFrame>")).match(/<a:tr\b/gu) || []).length;
+      await run(pdftoppm, ["-png", "-r", "100", "-f", String(index + 1), "-l", String(index + 1), join(temp, "ladder.pdf"), join(temp, `l${index}`)]);
+      const file = (await readdir(temp)).find((name) => name.startsWith(`l${index}`) && name.endsWith(".png"));
+      const { stdout } = await run("python3", ["-c", `import json,sys
+from PIL import Image
+a=json.loads(sys.argv[1]); im=Image.open(a['png']).convert('L'); d=100
+x=int((a['fx']+a['fw']-0.08)*d)
+ys=[y for y in range(int((a['fy']-0.3)*d), min(im.height, int((a['fy']+a['fh']+1.5)*d))) if im.getpixel((x,y))<90]
+lines=[]
+for y in ys:
+  if lines and y-lines[-1][-1]<=1: lines[-1].append(y)
+  else: lines.append([y])
+print(json.dumps([sum(l)/len(l)/d for l in lines]))`, JSON.stringify({ png: join(temp, file), fx, fy, fw, fh })]);
+      const borders = JSON.parse(stdout);
+      const rowHeight = fh / rows;
+      assert(borders.length >= rows, `slide ${index + 1}: ${borders.length} row borders for ${rows} rows`);
+      assert(Math.abs(borders.at(-1) - (fy + fh)) <= rowHeight / 2, `slide ${index + 1}: table ends at ${borders.at(-1).toFixed(2)} in, set ${(fy + fh).toFixed(2)} in (row ${rowHeight.toFixed(2)} in)`);
+    }
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});

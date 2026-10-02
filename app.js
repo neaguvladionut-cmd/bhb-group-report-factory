@@ -377,7 +377,8 @@ const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark"
 
 // Rule 10: readable participants per slide, split into the fewest slides, sizes differing by at most one.
 // Vlad 2026-10-02: ~11 participants per annex slide, labels ≥ 12 pt (A3 keeps its 5 groups of bars).
-const PARTICIPANT_START_CAPS = { "participant-mean": 11, "participant-comparison": 5, "competency-participants": 11 };
+// F49 (Orchestrator, true to template): A3 keeps the template's density — up to 6 participants per slide.
+const PARTICIPANT_START_CAPS = { "participant-mean": 11, "participant-comparison": 6, "competency-participants": 11 };
 const MIN_PARTICIPANT_LABEL_PT = 12;
 // A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
 // segment, and at least a quarter of the whole name (F34).
@@ -1023,7 +1024,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, outsideLabels = null, fixedAxis = false, plotLayout = null } = {}) {
+function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, outsideLabels = null, axisMinimumLabels = false, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -1054,6 +1055,15 @@ function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], category
       const txPr = (labels.match(/<c:txPr>[\s\S]*?<\/c:txPr>/u)?.[0] || "").replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/u, '<a:solidFill><a:srgbClr val="003057"/></a:solidFill>');
       const points = outsideLabels[index].map((point) => `<c:dLbl><c:idx val="${point}"/>${spPr}${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
       body = body.replace(/<c:dLbls>/u, `<c:dLbls>${points}`);
+    }
+    // F51: a score at the axis minimum (1.00) has no visible bar; its value label (outside the end) keeps it
+    // distinguishable from a missing score.
+    const atMinimum = axisMinimumLabels ? entry.values.map((value, point) => ({ value: roundChartValue(value), point })).filter(({ value }) => value !== null && value <= 1).map(({ point }) => point) : [];
+    if (atMinimum.length) {
+      const existing = body.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/u)?.[0] || "";
+      const txPr = (existing.match(/<c:txPr>[\s\S]*?<\/c:txPr>/u)?.[0] || '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="1"/></a:pPr><a:endParaRPr lang="ro-RO"/></a:p></c:txPr>').replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/u, "").replace(/(<a:defRPr\b[^>]*?)(\/>|>)/u, (whole, head, close) => `${head}>${'<a:solidFill><a:srgbClr val="003057"/></a:solidFill>'}${close === "/>" ? "</a:defRPr>" : ""}`);
+      const labels = atMinimum.map((point) => `<c:dLbl><c:idx val="${point}"/><c:numFmt formatCode="0.00" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
+      body = existing ? body.replace(/<c:dLbls>/u, `<c:dLbls>${labels}`) : body.replace(/<c:cat>/u, `<c:dLbls>${labels}<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:cat>`);
     }
     if (index >= templateSeries.length && seriesColors[index]) body = setSeriesFill(body, seriesColors[index]);
     if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
@@ -1147,9 +1157,9 @@ function chartSpec(item) {
   if (item.family === "ranking") return { data: { categories: ["Media"], series: item.items.map((row) => ({ name: competencyLabel(row.competency), values: [row.mean] })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH }, band: { id: 2, axis: "x" } };
   if (item.family === "population") return { data: { categories: item.rows.map((row) => row.competency), series: [{ name: "Low", values: item.rows.map((row) => row.below / 100) }, { name: "BENCH", values: item.rows.map((row) => row.in / 100) }, { name: "High", values: item.rows.map((row) => row.above / 100) }] }, options: {} };
   if (item.family === "zone") return { data: { categories: item.competencies, series: item.regions.map((region, index) => ({ name: region, values: item.values[index] })) }, options: { fixedAxis: true, categoryColors: ZONE_CATEGORY_COLORS }, band: { id: 2, axis: "y" } };
-  if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true }, band: { id: 3, axis: "x" } };
-  if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { ids: [2, 10], axis: "y" } };
-  if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { id: 3, axis: "y" } };
+  if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true, axisMinimumLabels: true }, band: { id: 3, axis: "x" } };
+  if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: item.labelSize || columnLabelSize(item.rows), axisMinimumLabels: true }, band: { ids: [2, 10], axis: "y" } };
+  if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: item.labelSize || columnLabelSize(item.rows), axisMinimumLabels: true }, band: { id: 3, axis: "y" } };
   return null;
 }
 // Rule 10: category labels stay ≥ 10 pt; they step down from the template size only as far as needed.
@@ -1408,10 +1418,12 @@ function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
   const layout = rowLayout(total, entries.length, baseSize);
   const columnWidth = Number(frame.match(/<a:gridCol w="(\d+)"/u)?.[1] || box.cx / 2) / 12700 - 6;
   const rowPoints = layout.height / 12700;
-  let nameSize = Math.min(layout.size || baseSize, baseSize);
-  while (nameSize > 900 && !entries.every((entry) => wrappedLines(entry.name, nameSize / 100, columnWidth) * nameSize / 100 * 1.15 <= rowPoints)) nameSize -= 50;
+  // F48: cell text never makes a row taller than its set height (≥ 7 pt in these ladder cells), so braces span their rows.
+  const scoreSize = Math.max(700, Math.min(layout.size || baseSize, Math.floor((rowPoints - 2) / 1.25 * 2) * 50));
+  let nameSize = scoreSize;
+  while (nameSize > 700 && !entries.every((entry) => wrappedLines(entry.name, nameSize / 100, columnWidth) * nameSize / 100 * 1.2 <= rowPoints - 2)) nameSize -= 50;
   const bands = entries.map((entry) => bandsOf(entry.value));
-  const rows = entries.map((entry, index) => setRowId(setRowHeight(setRowCells(bands[index] === "in" ? grey : white, [entry.name || "", f2(entry.value)], { sizes: [nameSize, layout.size || null] }), layout.height), 1000000 + index));
+  const rows = entries.map((entry, index) => setRowId(setRowHeight(setRowCells(bands[index] === "in" ? grey : white, [entry.name || "", f2(entry.value)], { sizes: [nameSize, scoreSize] }), layout.height), 1000000 + index));
   xml = updateShape(xml, tableId, (shape) => replaceTableRows(shape, rows.length ? rows : [setRowCells(white, ["", ""])]));
   return { xml, spans: bandSpans(frame, box, rows, bands) };
 }

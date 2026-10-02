@@ -46,9 +46,9 @@ export function chartSpec(item) {
   if (item.family === "ranking") return { data: { categories: ["Media"], series: item.items.map((row) => ({ name: competencyLabel(row.competency), values: [row.mean] })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH }, band: { id: 2, axis: "x" } };
   if (item.family === "population") return { data: { categories: item.rows.map((row) => row.competency), series: [{ name: "Low", values: item.rows.map((row) => row.below / 100) }, { name: "BENCH", values: item.rows.map((row) => row.in / 100) }, { name: "High", values: item.rows.map((row) => row.above / 100) }] }, options: {} };
   if (item.family === "zone") return { data: { categories: item.competencies, series: item.regions.map((region, index) => ({ name: region, values: item.values[index] })) }, options: { fixedAxis: true, categoryColors: ZONE_CATEGORY_COLORS }, band: { id: 2, axis: "y" } };
-  if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true }, band: { id: 3, axis: "x" } };
-  if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { ids: [2, 10], axis: "y" } };
-  if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: item.labelSize || columnLabelSize(item.rows) }, band: { id: 3, axis: "y" } };
+  if (item.family === "participant-mean") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: "Media", values: item.rows.map((row) => row.mean) }] }, options: { fixedAxis: true, axisMinimumLabels: true }, band: { id: 3, axis: "x" } };
+  if (item.family === "participant-comparison") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: item.competencies.map((competency) => ({ name: competency, values: item.rows.map((row) => row.scores[competency] ?? null) })) }, options: { fixedAxis: true, seriesColors: SERIES_SIXTH, labelSize: item.labelSize || columnLabelSize(item.rows), axisMinimumLabels: true }, band: { ids: [2, 10], axis: "y" } };
+  if (item.family === "competency-participants") return { data: { categories: item.rows.map((row) => wrappableName(row.name)), series: [{ name: item.competency, values: item.rows.map((row) => row.score) }] }, options: { fixedAxis: true, recolorTo: item.recolor || null, labelSize: item.labelSize || columnLabelSize(item.rows), axisMinimumLabels: true }, band: { id: 3, axis: "y" } };
   return null;
 }
 // Rule 10: category labels stay ≥ 10 pt; they step down from the template size only as far as needed.
@@ -307,10 +307,12 @@ function fillScoreTable(xml, tableId, entries, bandsOf, low, high) {
   const layout = rowLayout(total, entries.length, baseSize);
   const columnWidth = Number(frame.match(/<a:gridCol w="(\d+)"/u)?.[1] || box.cx / 2) / 12700 - 6;
   const rowPoints = layout.height / 12700;
-  let nameSize = Math.min(layout.size || baseSize, baseSize);
-  while (nameSize > 900 && !entries.every((entry) => wrappedLines(entry.name, nameSize / 100, columnWidth) * nameSize / 100 * 1.15 <= rowPoints)) nameSize -= 50;
+  // F48: cell text never makes a row taller than its set height (≥ 7 pt in these ladder cells), so braces span their rows.
+  const scoreSize = Math.max(700, Math.min(layout.size || baseSize, Math.floor((rowPoints - 2) / 1.25 * 2) * 50));
+  let nameSize = scoreSize;
+  while (nameSize > 700 && !entries.every((entry) => wrappedLines(entry.name, nameSize / 100, columnWidth) * nameSize / 100 * 1.2 <= rowPoints - 2)) nameSize -= 50;
   const bands = entries.map((entry) => bandsOf(entry.value));
-  const rows = entries.map((entry, index) => setRowId(setRowHeight(setRowCells(bands[index] === "in" ? grey : white, [entry.name || "", f2(entry.value)], { sizes: [nameSize, layout.size || null] }), layout.height), 1000000 + index));
+  const rows = entries.map((entry, index) => setRowId(setRowHeight(setRowCells(bands[index] === "in" ? grey : white, [entry.name || "", f2(entry.value)], { sizes: [nameSize, scoreSize] }), layout.height), 1000000 + index));
   xml = updateShape(xml, tableId, (shape) => replaceTableRows(shape, rows.length ? rows : [setRowCells(white, ["", ""])]));
   return { xml, spans: bandSpans(frame, box, rows, bands) };
 }

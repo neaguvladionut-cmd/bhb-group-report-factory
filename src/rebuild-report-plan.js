@@ -44,7 +44,8 @@ export const BUNDLE_FAMILIES = new Set(["key-findings", "range", "ranking", "ben
 
 // Rule 10: readable participants per slide, split into the fewest slides, sizes differing by at most one.
 // Vlad 2026-10-02: ~11 participants per annex slide, labels ≥ 12 pt (A3 keeps its 5 groups of bars).
-export const PARTICIPANT_START_CAPS = { "participant-mean": 11, "participant-comparison": 5, "competency-participants": 11 };
+// F49 (Orchestrator, true to template): A3 keeps the template's density — up to 6 participants per slide.
+export const PARTICIPANT_START_CAPS = { "participant-mean": 11, "participant-comparison": 6, "competency-participants": 11 };
 export const MIN_PARTICIPANT_LABEL_PT = 12;
 // A participant label wraps at spaces and hyphens onto at most four lines: it needs the width of its longest
 // segment, and at least a quarter of the whole name (F34).

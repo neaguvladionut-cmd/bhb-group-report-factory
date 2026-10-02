@@ -201,13 +201,13 @@ test("rules 5/6/9: tables resize by rows, braces follow rows, group suffix on ti
 test("rule 10 / A2–A4: annex charts are real charts, participants split equally and readably", () => {
   assert.deepEqual(splitEqual(Array.from({ length: 21 }, (_, index) => index), 20).map((page) => page.length), [11, 10]);
   assert.deepEqual(splitEqual(Array.from({ length: 23 }, (_, index) => index), 5).map((page) => page.length), [5, 5, 5, 4, 4]);
-  assert.equal(participantsPerSlide("participant-comparison", { seriesCount: 6 }), 5);
+  assert.equal(participantsPerSlide("participant-comparison", { seriesCount: 6 }), 6, "F49: A3 keeps the template's 6 per slide");
   const plan = variedDeck.plan;
   const pages = (family, competency) => plan.filter((item) => item.family === family && (!competency || item.competency === competency)).map((item) => item.rows.length);
   // Vlad 2026-10-02: ~11 per slide with labels ≥ 12 pt; 23 participants → 8/8/7, 33 → 11/11/11.
   assert.deepEqual(splitEqual(Array.from({ length: 33 }, (_, index) => index), participantsPerSlide("competency-participants", { longestLabel: 14 })).map((page) => page.length), [11, 11, 11]);
   assert.deepEqual(pages("participant-mean"), [8, 8, 7]);
-  assert.deepEqual(pages("participant-comparison"), [5, 5, 5, 4, 4]);
+  assert.deepEqual(pages("participant-comparison"), [6, 6, 6, 5]);
   for (const name of plan.filter((item) => item.family === "competency-participants").map((item) => item.competency)) assert.deepEqual(pages("competency-participants", name), [8, 8, 7]);
   for (const family of ["participant-mean", "participant-comparison", "competency-participants"]) assert(plan.filter((item) => item.family === family).every((item) => item.labelSize >= 1200), `${family} labels ≥ 12 pt`);
   const sixth = plan.findIndex((item) => item.family === "competency-participants" && item.competencyIndex === 5);
@@ -541,4 +541,17 @@ test("F47: overall means are sum/count; participants exactly at 2.75 and 3.50 co
   const table = insp7Deck.plan.find((item) => item.family === "benchmark" && !item.groupKey).table;
   assert.deepEqual([summary.shares.above, summary.shares.in, summary.shares.below], [table.shares.above, table.shares.in, table.shares.below]);
   for (const row of table.rows) if (Math.abs(row.value - 3.5) < 1e-9 || Math.abs(row.value - 2.75) < 1e-9) assert.equal(row.band, "in");
+});
+
+test("F51: a score at the axis minimum keeps a visible value label on A2, A3 and A4", async () => {
+  let checked = 0;
+  for (const [index, item] of insp7Deck.plan.entries()) {
+    if (!["participant-mean", "participant-comparison", "competency-participants"].includes(item.family)) continue;
+    const [{ chart }] = await insp7Deck.chartsOf(index);
+    chart.match(/<c:ser>[\s\S]*?<\/c:ser>/gu).forEach((series) => {
+      const values = [...series.match(/<c:val>[\s\S]*?<\/c:val>/u)[0].matchAll(/<c:pt idx="(\d+)"><c:v>([^<]*)<\/c:v>/gu)].filter((match) => Number(match[2]) <= 1);
+      for (const [, point] of values) { checked += 1; assert.match(series, new RegExp(`<c:dLbl><c:idx val="${point}"/>[\\s\\S]*?<c:dLblPos val="outEnd"/>[\\s\\S]*?<c:showVal val="1"/>`, "u")); }
+    });
+  }
+  assert(checked > 0, "the fixture has scores at 1.00 in the annex charts");
 });

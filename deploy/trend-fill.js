@@ -321,7 +321,7 @@ function setSeriesFill(seriesXml, hex) {
  * formatting. data = {categories, series:[{name, values}]}; options: {sheet, seriesColors (for series
  * beyond the template's), categoryColors (per-point colours, chart6), recolor:{from,to}, minLabelSize}.
  */
-export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, outsideLabels = null, fixedAxis = false, plotLayout = null } = {}) {
+export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], categoryColors = null, recolorTo = null, minLabelSize = null, labelSize = null, dataLabelSize = null, valueOnlyLabels = false, legend = null, legendLayout = null, outsideLabels = null, axisMinimumLabels = false, fixedAxis = false, plotLayout = null } = {}) {
   const templateSeries = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/gu) || [];
   if (!templateSeries.length) throw new Error("Template chart has no series.");
   const first = xml.indexOf(templateSeries[0]); const last = xml.lastIndexOf(templateSeries.at(-1)) + templateSeries.at(-1).length;
@@ -352,6 +352,15 @@ export function fillChartXml(xml, data, { sheet = "Sheet1", seriesColors = [], c
       const txPr = (labels.match(/<c:txPr>[\s\S]*?<\/c:txPr>/u)?.[0] || "").replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/u, '<a:solidFill><a:srgbClr val="003057"/></a:solidFill>');
       const points = outsideLabels[index].map((point) => `<c:dLbl><c:idx val="${point}"/>${spPr}${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
       body = body.replace(/<c:dLbls>/u, `<c:dLbls>${points}`);
+    }
+    // F51: a score at the axis minimum (1.00) has no visible bar; its value label (outside the end) keeps it
+    // distinguishable from a missing score.
+    const atMinimum = axisMinimumLabels ? entry.values.map((value, point) => ({ value: roundChartValue(value), point })).filter(({ value }) => value !== null && value <= 1).map(({ point }) => point) : [];
+    if (atMinimum.length) {
+      const existing = body.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/u)?.[0] || "";
+      const txPr = (existing.match(/<c:txPr>[\s\S]*?<\/c:txPr>/u)?.[0] || '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="1"/></a:pPr><a:endParaRPr lang="ro-RO"/></a:p></c:txPr>').replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/u, "").replace(/(<a:defRPr\b[^>]*?)(\/>|>)/u, (whole, head, close) => `${head}>${'<a:solidFill><a:srgbClr val="003057"/></a:solidFill>'}${close === "/>" ? "</a:defRPr>" : ""}`);
+      const labels = atMinimum.map((point) => `<c:dLbl><c:idx val="${point}"/><c:numFmt formatCode="0.00" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${txPr}<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`).join("");
+      body = existing ? body.replace(/<c:dLbls>/u, `<c:dLbls>${labels}`) : body.replace(/<c:cat>/u, `<c:dLbls>${labels}<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:cat>`);
     }
     if (index >= templateSeries.length && seriesColors[index]) body = setSeriesFill(body, seriesColors[index]);
     if (recolorTo) body = recolor(body, seriesFillColor(body), recolorTo);
