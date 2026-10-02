@@ -95,6 +95,13 @@ test("empty findings tiles are omitted and count tiles have no export-proposal c
   assert.doesNotMatch(app, /stat-caption|Propunere din export\./u);
 });
 
+test("confirming the final warning focuses the first blocker when blockers remain", async () => {
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  const issues = await readFile(resolve(root, "src/rebuild-issues.js"), "utf8");
+  assert.match(app, /else if \(blockers\.length\) \{ const firstBlocker = document\.querySelector\("\.issue-group\.blocker"\); firstBlocker\?\.focus\(\{ preventScroll: true \}\); \}/u);
+  assert.match(issues, /article\.tabIndex = -1/u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
