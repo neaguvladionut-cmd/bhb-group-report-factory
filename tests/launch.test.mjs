@@ -67,6 +67,14 @@ test("drawer methodology fields share the page-one proposal keys", async () => {
   assert.match(app, /setProposal\(input\); recompute\(\)/u);
 });
 
+test("adding a source preserves edited proposals and corrections for the next render", async () => {
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  assert.match(app, /methodologyProposalEdits: new Set\(\)/u);
+  assert.match(app, /state\.methodologyProposalEdits\.add\(key\)/u);
+  assert.doesNotMatch(app, /files = mergeSelectedFiles\(files, incoming\); state\.acknowledged\.clear\(\); state\.corrections = \{ values: \{\} \}; state\.methodologyProposals = \{\};/u);
+  assert.match(app, /if \(!state\.methodologyProposalEdits\.has\(key\)\) state\.methodologyProposals\[key\] = String\(value\)/u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
