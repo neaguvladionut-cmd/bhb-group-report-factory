@@ -82,6 +82,12 @@ test("page-two review footer reports blockers, warning groups and confirmed stat
   assert.match(app, /Totul este confirmat; poți continua\./u);
 });
 
+test("separate-annex outline is built from the two delivered plans", async () => {
+  const app = await readFile(resolve(root, "src/rebuild-app.js"), "utf8");
+  assert.match(app, /\(annex === "separate" \? \[mainPlan, appendixPlan\] : \[plan\]\)\.flatMap\(groupOutlineSlides\)/u);
+  assert.match(app, /const deliveredTotal = annex === "separate" \? mainPlan\.length \+ appendixPlan\.length/u);
+});
+
 test("source-owned build emits the new normalized payload and package-preserving route", async () => {
   const core = await readFile(resolve(root, "src/rebuild-core.js"), "utf8");
   const plan = await readFile(resolve(root, "src/rebuild-report-plan.js"), "utf8");
