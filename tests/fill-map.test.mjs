@@ -390,3 +390,21 @@ test("F30/F34/F35: A3 legend sized to name every competency; one annex label siz
     assert(nameTexts.length <= names.size, "series names appear in the legend only, never inside bars");
   });
 });
+
+test("F36: each bundle image carries its own heading; files are named NN-item-scope (ASCII)", async () => {
+  const artifacts = await buildBundleArtifacts(XLSX, payloadOf(insp5, { splitGroups: true }));
+  for (const [index, entry] of artifacts.manifest.items.entries()) {
+    assert.match(entry.file, /^\d{3}-[a-z-]+-[a-z0-9-]+$/u);
+    const itemTexts = artifacts.layouts[index].texts.filter((text) => !text.caption).map((text) => text.line).join(" ");
+    const first = entry.heading.split(/\s+/u).slice(0, 2).join(" ");
+    assert(itemTexts.includes(first), `${entry.file} shows its heading „${entry.heading}” inside the item`);
+    if (entry.family === "key-findings") assert.match(itemTexts, /medie \d\.\d\d · mediană \d\.\d\d/u);
+    assert.doesNotMatch(artifacts.layouts[index].texts.filter((text) => text.caption).map((text) => text.line).join(" "), new RegExp(entry.title.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  }
+  assert.equal(new Set(artifacts.svg.map((item) => item.name)).size, artifacts.svg.length);
+});
+
+test("F39: with every slide type off and no annex the how-to-read keeps only the opening and the closing sentence", () => {
+  const off = reportPlan(payloadOf(insp5, { annex: "none", slideToggles: { range: false, competencyMean: false, benchmark: false, competencyDistribution: false, zone: false, observation: false, behavior: false, conclusions: false } }));
+  assert.deepEqual(off.find((item) => item.family === "how-to-read").paragraphs, ["Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim.", "Rezultatele descriu grupul evaluat."]);
+});

@@ -162,6 +162,14 @@ function parseDetailed(schema, corrections = {}) {
     }
     records.push({ name, assessment, identity, code, region, scores, rowNumber, source: schema.sourceName });
   }
+  // F40: a behaviour with no score in any row is reported once (behaviour + number of participants), not row by row.
+  for (const column of columns) {
+    if (behaviorRecords.some((record) => record.competency === column.competency && record.behavior === column.behavior)) continue;
+    const blanks = issues.filter((item) => item.code === "detailed-blank" && item.competency === column.competency && item.behavior === column.behavior);
+    if (!blanks.length) continue;
+    for (const blank of blanks) issues.splice(issues.indexOf(blank), 1);
+    issue(issues, "warning", "detailed-all-blank", `Comportament fără niciun scor în export: „${column.behavior}” (${blanks.length} participanți fără scor). Este exclus din clasament; rămâne în șablonul CSV.`, undefined, { sourceName: schema.sourceName, field: column.behavior, competency: column.competency, behavior: column.behavior, id: `detailed-all-blank:${folded(column.competency)}:${folded(column.behavior)}` });
+  }
   const behaviorCatalog = columns.filter((column, index, all) => all.findIndex((candidate) => candidate.competency === column.competency && candidate.behavior === column.behavior) === index).map((column) => ({ competency: column.competency, subcompetency: column.subcompetency || "", behavior: column.behavior, behaviorRaw: column.behaviorRaw, sourceIndex: column.order }));
   return { records, behaviorRecords, behaviorCatalog, competencies: [...new Set(columns.map(({ competency }) => competency))], issues };
 }
@@ -187,8 +195,9 @@ const scoreStats = (records, competency) => {
 // D315 / D314 scope: a CSV row that names a competency matches only within it; a row with a blank competency
 // matches on the behaviour text alone; more than one candidate falls back to the imported text with a warning.
 function descriptorFor(descriptors, competency, behavior, warnings, behaviorRaw = behavior) {
-  const texts = new Set([exact(behavior), exact(behaviorRaw)]);
-  const sameText = descriptors.filter((item) => texts.has(exact(item.behavior)));
+  // F38: the raw imported text is the cross-tool key; the cleaned text is the fallback.
+  const rawMatches = descriptors.filter((item) => exact(item.behavior) === exact(behaviorRaw));
+  const sameText = rawMatches.length ? rawMatches : descriptors.filter((item) => exact(item.behavior) === exact(behavior));
   const scoped = sameText.filter((item) => item.competency && folded(item.competency) === folded(competency));
   const blank = sameText.filter((item) => !item.competency);
   const candidates = scoped.length ? scoped : blank;
@@ -263,6 +272,11 @@ function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState 
   const calculations = parsedSummary.competencies.map((competency) => scoreStats(records, competency));
   const overallScores = records.map((record) => Object.values(record.scores).reduce((sum, value, _, values) => sum + value / values.length, 0));
   const bands = { low, high, below: overallScores.filter((score) => score < low).length, typical: overallScores.filter((score) => score >= low && score <= high).length, above: overallScores.filter((score) => score > high).length, n: overallScores.length };
+  // F37: a CSV row that matches no imported behaviour is reported (row and text); its texts are not used.
+  for (const record of descriptors) {
+    const matched = parsedDetailed.behaviorCatalog.some((row) => [exact(row.behaviorRaw), exact(row.behavior)].includes(exact(record.behavior)) && (!record.competency || folded(record.competency) === folded(row.competency)));
+    if (!matched) warnings.push({ severity: "warning", code: "descriptor-unmatched", message: `Rândul ${record.rowNumber} din fișierul de declinații nu corespunde niciunui comportament importat: „${record.behavior}”.`, sourceName: record.source, rowNumber: record.rowNumber, field: record.behavior, id: `descriptor-unmatched:${folded(record.source)}:${record.rowNumber}` });
+  }
   const descriptorWarnings = [];
   const aggregates = behaviorAggregates(parsedDetailed.behaviorRecords, includedIdentities, descriptors, descriptorWarnings);
   warnings.push(...descriptorWarnings);
@@ -271,7 +285,7 @@ function buildPayload(XLSX, files, metadata = {}, corrections = {}, reviewState 
   const groups = codeValues.map((code) => ({ code, name: code, records: records.filter((record) => record.code === code) }));
   const zoneCalculations = zones.flatMap((zone) => parsedSummary.competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) })));
   // F20: after import the template lists every imported behaviour with the declined texts already known.
-  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => { const known = descriptorFor(descriptors, row.competency, row.behavior, [], row.behaviorRaw); return { competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behavior, objective_text_score_0: known.score0 || "", "objective_text_score_-1": known.scoreMinus1 || "", objective_text_score_1: known.score1 || "", objective_text_score_2: known.score2 || "" }; });
+  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => { const known = descriptorFor(descriptors, row.competency, row.behavior, [], row.behaviorRaw); return { competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behaviorRaw || row.behavior, objective_text_score_0: known.score0 || "", "objective_text_score_-1": known.scoreMinus1 || "", objective_text_score_1: known.score1 || "", objective_text_score_2: known.score2 || "" }; });
   return {
     calculationVersion: CALCULATION_VERSION,
     createdAt: new Date().toISOString(),
@@ -406,17 +420,17 @@ const behaviorPageGroups = (rows) => pageGroups(rows, 6);
 
 const range = (low, high) => `${f2(low)}–${f2(high)}`;
 // §10a, approved standard text; the last sentence follows the annex setting.
-// F26: a sentence that explains a chart type is left out when that chart type is toggled off.
-function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end", toggles = {}) {
-  const on = (key) => toggles[key] !== false;
+// F26/F39: each sentence appears only when a generated slide shows what it explains; with nothing generated, only
+// the generic opening and the annex sentence remain. `families` = the plan families that are generated.
+const ALL_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark", "population", "zone", "behavior", "participant-mean", "participant-comparison", "competency-participants"]);
+function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end", families = ALL_FAMILIES) {
+  const has = (...names) => names.some((name) => families.has(name));
+  const opening = "Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim.";
+  const bandText = has("range", "ranking", "zone", "participant-mean", "participant-comparison", "competency-participants") ? ` Banda gri din grafice marchează intervalul de referință (benchmark) de ${range(low, high)}, care corespunde unei performanțe la nivel mediu în evaluările TREND: rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie.` : "";
+  const second = [has("key-findings", "range", "ranking", "benchmark", "participant-mean") ? "Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme." : "", has("range") ? "Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților." : ""].filter(Boolean).join(" ");
+  const third = has("key-findings", "behavior") ? ["Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate.", has("key-findings") ? "Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat." : ""].filter(Boolean).join(" ") : "";
   const last = annex === "none" ? "Rezultatele descriu grupul evaluat." : `Rezultatele descriu grupul evaluat. Rezultatele individuale se regăsesc ${annex === "separate" ? "în anexa transmisă separat" : "în anexă"}.`;
-  const second = ["Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme.", on("range") ? "Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților." : ""].filter(Boolean).join(" ");
-  const keyFindings = on("keyFindings") && on("observation");
-  const third = keyFindings || on("behavior") ? ["Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate.", keyFindings ? "Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat." : ""].filter(Boolean).join(" ") : "";
-  return [
-    `Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim. Banda gri din grafice marchează intervalul de referință (benchmark) de ${range(low, high)}, care corespunde unei performanțe la nivel mediu în evaluările TREND: rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie.`,
-    second, third, last
-  ].filter(Boolean);
+  return [`${opening}${bandText}`, second, third, last].filter(Boolean);
 }
 const HOW_TO_READ = (low = 2.75, high = 3.5, annex = "end") => howToReadParagraphs(low, high, annex).join(" ");
 
@@ -603,13 +617,15 @@ function reportPlan(payload, { scope = "whole" } = {}) {
   const year = text(metadata.reportDate).match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
   const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "main", ...data });
   add("cover", { title: `${client} – ${program}`, client, program, year });
-  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: howToReadParagraphs(payload.bands.low, payload.bands.high, annex, toggles) });
+  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: [] });
   add("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) });
   add("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) });
   if (toggles.keyFindings !== false && toggles.observation !== false) competencyFindings(payload).forEach((finding) => add("key-findings", { ...finding, title: `Distribuția pe competențe – ${finding.competency}`, low: payload.bands.low, high: payload.bands.high }));
   addTemplateSection(slides, payload);
   if (metadata.splitGroups && (payload.groups || []).length >= 2) payload.groups.forEach((group) => addTemplateSection(slides, viewForGroup(payload, group), group.code));
   const appendix = annex === "none" ? [] : appendixSlides(payload);
+  const generated = new Set([...slides, ...appendix].map((slide) => slide.family));
+  slides.find((slide) => slide.family === "how-to-read").paragraphs = howToReadParagraphs(payload.bands.low, payload.bands.high, appendix.length ? annex : "none", generated);
   const close = { family: "close", templateIndex: 22, title: "MULȚUMIM!", groupKey: "", deliverable: "main" };
   let selected;
   if (scope === "main") selected = [...slides, close];
@@ -1609,8 +1625,15 @@ async function generateTrendPptx(payload, { scope = "whole" } = {}) {
 
 // ---------------------------------------------------------------- BHB bundle (fill map §2)
 // Each item is drawn from the same data the deck writes; its page/image is cropped to its own bounds + 24 px.
+const asciiSlug = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/gu, "").toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 48).replace(/-+$/u, "");
+const ITEM_SLUGS = { "key-findings": "constatari-cheie", range: "mediana-plaja", ranking: "media-pe-competente", benchmark: "distributie-benchmark", population: "populatie-benchmark", zone: "rezultate-pe-zone", behavior: "comportamente-cheie", "participant-mean": "media-pe-participant", "participant-comparison": "competente-pe-participant", "competency-participants": "competenta-pe-participanti" };
 function bundleItems(payload) {
-  return reportPlan(payload, { scope: "whole" }).filter((item) => BUNDLE_FAMILIES.has(item.family)).map((item, index) => ({ id: String(index + 1).padStart(3, "0"), item, ...bundleContent(item) }));
+  return reportPlan(payload, { scope: "whole" }).filter((item) => BUNDLE_FAMILIES.has(item.family)).map((item, index) => {
+    const id = String(index + 1).padStart(3, "0");
+    const heading = item.family === "key-findings" || item.family === "behavior" ? `${item.competency}${item.suffix || ""}` : item.title;
+    const scope = [item.competency, item.groupLabel || (item.competency ? "" : "intreg-proiect"), item.pages > 1 ? `p${item.page}` : ""].filter(Boolean).join("-");
+    return { id, item, heading, fileStem: `${id}-${ITEM_SLUGS[item.family]}-${asciiSlug(scope)}`, ...bundleContent(item) };
+  });
 }
 const chartValueText = (value) => { const rounded = roundChartValue(value); return rounded === null ? "" : String(rounded); };
 function bundleContent(item) {
@@ -1646,11 +1669,16 @@ function layoutItem(entry, font) {
   const textLines = (value, x, size, maxWidth, color = BHB.ink, lineHeight = size * 1.3) => { const lines = wrapText(font, value, size, maxWidth); lines.forEach((line, index) => texts.push({ line, x, y: y + size + index * lineHeight, size, color })); return lines.length * lineHeight; };
   // Caption strip (outside the item proper): title, scope and benchmark.
   const captionStart = texts.length; const captionShapes = shapes.length;
-  y += textLines(entry.item.title, margin, 30, width - 2 * margin, BHB.navy) + 6;
-  y += textLines(`${entry.item.groupLabel ? `Grup: ${entry.item.groupLabel}` : "Întregul proiect"}${entry.item.low !== undefined ? ` · benchmark ${f2(entry.item.low)}–${f2(entry.item.high)}` : ""}${entry.subtitle ? ` · ${entry.subtitle}` : ""}`, margin, 18, width - 2 * margin, BHB.muted) + 16;
+  // Caption strip (PDF page only; also in the manifest): scope, benchmark, n.
+  const count = entry.item.scores?.length ?? entry.item.table?.rows.length ?? entry.item.rows?.length;
+  y += textLines(`${entry.item.groupLabel ? `Grup: ${entry.item.groupLabel}` : "Întregul proiect"}${entry.item.low !== undefined ? ` · benchmark ${f2(entry.item.low)}–${f2(entry.item.high)}` : ""}${count ? ` · n ${count}` : ""}`, margin, 18, width - 2 * margin, BHB.muted) + 10;
   shapes.push({ type: "rect", x: margin, y, w: width - 2 * margin, h: 2, fill: BHB.aqua }); y += 18;
   texts.slice(captionStart).forEach((entryText) => { entryText.caption = true; }); shapes.slice(captionShapes).forEach((shape) => { shape.caption = true; });
   const itemTop = y - margin; // the item proper starts here; the caption strip above is for the PDF page only
+  // F36: the item's own heading travels with the PNG/SVG.
+  y += textLines(entry.heading, margin, 28, width - 2 * margin, BHB.navy) + 4;
+  if (entry.subtitle) y += textLines(entry.subtitle, margin, 18, width - 2 * margin, BHB.muted) + 4;
+  y += 12;
   if (entry.kind === "chart") {
     const labelWidth = 380; const plotX = margin + labelWidth + 16; const plotW = width - plotX - margin - 70; const [min, max] = entry.scale;
     const scaleX = (value) => plotX + (Math.max(min, Math.min(max, value)) - min) / (max - min) * plotW;
@@ -1713,8 +1741,8 @@ async function buildBundleArtifacts(XLSX, payload) {
   for (const entry of items) {
     const layout = layoutItem(entry, font); layouts.push(layout);
     const image = itemOnly(layout);
-    svg.push({ name: `SVG/${entry.id}-${entry.item.family}.svg`, content: svgItem(image, font), width: image.width, height: image.height });
-    manifest.push({ id: entry.id, title: entry.item.title, family: entry.item.family, group: entry.item.groupKey || "whole-project", groupLabel: entry.item.groupLabel || "", benchmark: entry.item.low !== undefined ? `${f2(entry.item.low)}–${f2(entry.item.high)}` : "", caption: entry.subtitle || "", deckSlide: entry.item.number, width: image.width, height: image.height, pdfPage: { width: layout.width, height: layout.height }, sourceValues: entry.sourceValues.map(String) });
+    svg.push({ name: `SVG/${entry.fileStem}.svg`, content: svgItem(image, font), width: image.width, height: image.height });
+    manifest.push({ id: entry.id, file: entry.fileStem, heading: entry.heading, title: entry.item.title, family: entry.item.family, group: entry.item.groupKey || "whole-project", groupLabel: entry.item.groupLabel || "", benchmark: entry.item.low !== undefined ? `${f2(entry.item.low)}–${f2(entry.item.high)}` : "", caption: entry.subtitle || "", deckSlide: entry.item.number, width: image.width, height: image.height, pdfPage: { width: layout.width, height: layout.height }, sourceValues: entry.sourceValues.map(String) });
   }
   const workbook = XLSX.utils.book_new();
   for (const [index, entry] of items.entries()) {

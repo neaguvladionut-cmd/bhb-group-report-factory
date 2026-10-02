@@ -159,6 +159,14 @@ function parseDetailed(schema, corrections = {}) {
     }
     records.push({ name, assessment, identity, code, region, scores, rowNumber, source: schema.sourceName });
   }
+  // F40: a behaviour with no score in any row is reported once (behaviour + number of participants), not row by row.
+  for (const column of columns) {
+    if (behaviorRecords.some((record) => record.competency === column.competency && record.behavior === column.behavior)) continue;
+    const blanks = issues.filter((item) => item.code === "detailed-blank" && item.competency === column.competency && item.behavior === column.behavior);
+    if (!blanks.length) continue;
+    for (const blank of blanks) issues.splice(issues.indexOf(blank), 1);
+    issue(issues, "warning", "detailed-all-blank", `Comportament fără niciun scor în export: „${column.behavior}” (${blanks.length} participanți fără scor). Este exclus din clasament; rămâne în șablonul CSV.`, undefined, { sourceName: schema.sourceName, field: column.behavior, competency: column.competency, behavior: column.behavior, id: `detailed-all-blank:${folded(column.competency)}:${folded(column.behavior)}` });
+  }
   const behaviorCatalog = columns.filter((column, index, all) => all.findIndex((candidate) => candidate.competency === column.competency && candidate.behavior === column.behavior) === index).map((column) => ({ competency: column.competency, subcompetency: column.subcompetency || "", behavior: column.behavior, behaviorRaw: column.behaviorRaw, sourceIndex: column.order }));
   return { records, behaviorRecords, behaviorCatalog, competencies: [...new Set(columns.map(({ competency }) => competency))], issues };
 }
@@ -184,8 +192,9 @@ const scoreStats = (records, competency) => {
 // D315 / D314 scope: a CSV row that names a competency matches only within it; a row with a blank competency
 // matches on the behaviour text alone; more than one candidate falls back to the imported text with a warning.
 function descriptorFor(descriptors, competency, behavior, warnings, behaviorRaw = behavior) {
-  const texts = new Set([exact(behavior), exact(behaviorRaw)]);
-  const sameText = descriptors.filter((item) => texts.has(exact(item.behavior)));
+  // F38: the raw imported text is the cross-tool key; the cleaned text is the fallback.
+  const rawMatches = descriptors.filter((item) => exact(item.behavior) === exact(behaviorRaw));
+  const sameText = rawMatches.length ? rawMatches : descriptors.filter((item) => exact(item.behavior) === exact(behavior));
   const scoped = sameText.filter((item) => item.competency && folded(item.competency) === folded(competency));
   const blank = sameText.filter((item) => !item.competency);
   const candidates = scoped.length ? scoped : blank;
@@ -260,6 +269,11 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const calculations = parsedSummary.competencies.map((competency) => scoreStats(records, competency));
   const overallScores = records.map((record) => Object.values(record.scores).reduce((sum, value, _, values) => sum + value / values.length, 0));
   const bands = { low, high, below: overallScores.filter((score) => score < low).length, typical: overallScores.filter((score) => score >= low && score <= high).length, above: overallScores.filter((score) => score > high).length, n: overallScores.length };
+  // F37: a CSV row that matches no imported behaviour is reported (row and text); its texts are not used.
+  for (const record of descriptors) {
+    const matched = parsedDetailed.behaviorCatalog.some((row) => [exact(row.behaviorRaw), exact(row.behavior)].includes(exact(record.behavior)) && (!record.competency || folded(record.competency) === folded(row.competency)));
+    if (!matched) warnings.push({ severity: "warning", code: "descriptor-unmatched", message: `Rândul ${record.rowNumber} din fișierul de declinații nu corespunde niciunui comportament importat: „${record.behavior}”.`, sourceName: record.source, rowNumber: record.rowNumber, field: record.behavior, id: `descriptor-unmatched:${folded(record.source)}:${record.rowNumber}` });
+  }
   const descriptorWarnings = [];
   const aggregates = behaviorAggregates(parsedDetailed.behaviorRecords, includedIdentities, descriptors, descriptorWarnings);
   warnings.push(...descriptorWarnings);
@@ -268,7 +282,7 @@ export function buildPayload(XLSX, files, metadata = {}, corrections = {}, revie
   const groups = codeValues.map((code) => ({ code, name: code, records: records.filter((record) => record.code === code) }));
   const zoneCalculations = zones.flatMap((zone) => parsedSummary.competencies.map((competency) => ({ region: zone.region, ...scoreStats(zone.records, competency) })));
   // F20: after import the template lists every imported behaviour with the declined texts already known.
-  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => { const known = descriptorFor(descriptors, row.competency, row.behavior, [], row.behaviorRaw); return { competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behavior, objective_text_score_0: known.score0 || "", "objective_text_score_-1": known.scoreMinus1 || "", objective_text_score_1: known.score1 || "", objective_text_score_2: known.score2 || "" }; });
+  const descriptorTemplate = parsedDetailed.behaviorCatalog.map((row) => { const known = descriptorFor(descriptors, row.competency, row.behavior, [], row.behaviorRaw); return { competency: row.competency, subcompetency: row.subcompetency || "", behavior: row.behaviorRaw || row.behavior, objective_text_score_0: known.score0 || "", "objective_text_score_-1": known.scoreMinus1 || "", objective_text_score_1: known.score1 || "", objective_text_score_2: known.score2 || "" }; });
   return {
     calculationVersion: CALCULATION_VERSION,
     createdAt: new Date().toISOString(),

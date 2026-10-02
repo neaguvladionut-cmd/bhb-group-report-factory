@@ -47,7 +47,8 @@ test("F18: a trailing /TOKEN shared by every behaviour is an export code and is 
   const uniform = buildPayload(XLSX, [{ name: "s.xlsx", bytes: summary }, { name: "d.xlsx", bytes: detailed }], { projectName: "Uniform" }, {}, { acknowledgedWarningIds: [] });
   assert.deepEqual(uniform.behaviorAggregates.map((row) => row.behavior), ["Ascultă activ", "Rezumă clar", "Decide la timp"]);
   const template = XLSX.utils.sheet_to_json(createEvaluationSheetTemplate(XLSX, uniform).Sheets["Evaluation sheet"], { header: 1 });
-  assert.deepEqual(template.slice(1).map((row) => row[2]), ["Ascultă activ", "Rezumă clar", "Decide la timp"]);
+  // F38 (ruling): the template's behavior column is the RAW export text, the cross-tool key with the Dev Plan.
+  assert.deepEqual(template.slice(1).map((row) => row[2]), ["(0–2) Ascultă activ /PPCd", "Rezumă clar /PPCd", "Decide la timp /PPCd"]);
   for (const item of reportPlan(uniform)) assert.doesNotMatch(JSON.stringify([item.title, item.key, item.development, item.strengths]), /\/PPCd|\(0–2\)/u);
 });
 
@@ -72,4 +73,23 @@ test("F20: the CSV template has headers only before import and every behaviour w
   assert(declined.length >= 4, `known declinations are carried (${declined.length})`);
   const sharedUnderC2 = after.find((row) => row[0] === COMPETENCIES[1].name && row[2] === SHARED);
   assert.equal(sharedUnderC2[6], "");
+});
+
+test("F37/F38/F40: unmatched CSV row warned with its row; CSV template keys on the raw text; an all-blank behaviour is one warning", async () => {
+  const { createFixture: insp5Fixture } = await import("./fixtures/grf-r-insp5-fixture.mjs");
+  for (const token of [false, true]) {
+    const source = insp5Fixture(XLSX, { token });
+    const result = buildPayload(XLSX, [{ name: "summary.xlsx", bytes: source.summary }, { name: "detail.xlsx", bytes: source.detailed }, { name: "evaluation-sheet-template.csv", bytes: source.csv }], source.metadata, {}, { acknowledgedWarningIds: [] });
+    const unmatched = result.warnings.filter((item) => item.code === "descriptor-unmatched");
+    assert.equal(unmatched.length, 1); assert.match(unmatched[0].message, /Rândul \d+ .*„Comportament care nu există în export/u);
+    const blanks = result.warnings.filter((item) => item.code === "detailed-all-blank");
+    assert.equal(blanks.length, 1); assert.match(blanks[0].message, /\(22 participanți fără scor\)/u);
+    assert(!result.warnings.some((item) => item.code === "detailed-blank" && /niciun scor/u.test(item.behavior)));
+    const template = XLSX.utils.sheet_to_json(createEvaluationSheetTemplate(XLSX, result).Sheets["Evaluation sheet"], { header: 1, defval: "" });
+    if (token) assert(template.slice(1).every((row) => row[2].endsWith(" /XYZd")), "raw export text, codes included");
+    assert(template.some((row) => /^\(0-2\) Adaptează mesajul/u.test(row[2])));
+    const adapted = result.behaviorAggregates.find((row) => row.behaviorRaw.startsWith("(0-2) Adaptează"));
+    assert.equal(adapted.score2, "Ai adaptat mesajul interlocutorului", "a CSV row with the raw text matches first");
+    if (token) assert(result.behaviorAggregates.every((row) => !row.behavior.endsWith("/XYZd")), "a uniform code is stripped from client text");
+  }
 });

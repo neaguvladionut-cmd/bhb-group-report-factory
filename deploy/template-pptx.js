@@ -594,8 +594,15 @@ export async function generateTrendPptx(payload, { scope = "whole" } = {}) {
 
 // ---------------------------------------------------------------- BHB bundle (fill map §2)
 // Each item is drawn from the same data the deck writes; its page/image is cropped to its own bounds + 24 px.
+const asciiSlug = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/gu, "").toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 48).replace(/-+$/u, "");
+const ITEM_SLUGS = { "key-findings": "constatari-cheie", range: "mediana-plaja", ranking: "media-pe-competente", benchmark: "distributie-benchmark", population: "populatie-benchmark", zone: "rezultate-pe-zone", behavior: "comportamente-cheie", "participant-mean": "media-pe-participant", "participant-comparison": "competente-pe-participant", "competency-participants": "competenta-pe-participanti" };
 export function bundleItems(payload) {
-  return reportPlan(payload, { scope: "whole" }).filter((item) => BUNDLE_FAMILIES.has(item.family)).map((item, index) => ({ id: String(index + 1).padStart(3, "0"), item, ...bundleContent(item) }));
+  return reportPlan(payload, { scope: "whole" }).filter((item) => BUNDLE_FAMILIES.has(item.family)).map((item, index) => {
+    const id = String(index + 1).padStart(3, "0");
+    const heading = item.family === "key-findings" || item.family === "behavior" ? `${item.competency}${item.suffix || ""}` : item.title;
+    const scope = [item.competency, item.groupLabel || (item.competency ? "" : "intreg-proiect"), item.pages > 1 ? `p${item.page}` : ""].filter(Boolean).join("-");
+    return { id, item, heading, fileStem: `${id}-${ITEM_SLUGS[item.family]}-${asciiSlug(scope)}`, ...bundleContent(item) };
+  });
 }
 const chartValueText = (value) => { const rounded = roundChartValue(value); return rounded === null ? "" : String(rounded); };
 function bundleContent(item) {
@@ -631,11 +638,16 @@ function layoutItem(entry, font) {
   const textLines = (value, x, size, maxWidth, color = BHB.ink, lineHeight = size * 1.3) => { const lines = wrapText(font, value, size, maxWidth); lines.forEach((line, index) => texts.push({ line, x, y: y + size + index * lineHeight, size, color })); return lines.length * lineHeight; };
   // Caption strip (outside the item proper): title, scope and benchmark.
   const captionStart = texts.length; const captionShapes = shapes.length;
-  y += textLines(entry.item.title, margin, 30, width - 2 * margin, BHB.navy) + 6;
-  y += textLines(`${entry.item.groupLabel ? `Grup: ${entry.item.groupLabel}` : "Întregul proiect"}${entry.item.low !== undefined ? ` · benchmark ${f2(entry.item.low)}–${f2(entry.item.high)}` : ""}${entry.subtitle ? ` · ${entry.subtitle}` : ""}`, margin, 18, width - 2 * margin, BHB.muted) + 16;
+  // Caption strip (PDF page only; also in the manifest): scope, benchmark, n.
+  const count = entry.item.scores?.length ?? entry.item.table?.rows.length ?? entry.item.rows?.length;
+  y += textLines(`${entry.item.groupLabel ? `Grup: ${entry.item.groupLabel}` : "Întregul proiect"}${entry.item.low !== undefined ? ` · benchmark ${f2(entry.item.low)}–${f2(entry.item.high)}` : ""}${count ? ` · n ${count}` : ""}`, margin, 18, width - 2 * margin, BHB.muted) + 10;
   shapes.push({ type: "rect", x: margin, y, w: width - 2 * margin, h: 2, fill: BHB.aqua }); y += 18;
   texts.slice(captionStart).forEach((entryText) => { entryText.caption = true; }); shapes.slice(captionShapes).forEach((shape) => { shape.caption = true; });
   const itemTop = y - margin; // the item proper starts here; the caption strip above is for the PDF page only
+  // F36: the item's own heading travels with the PNG/SVG.
+  y += textLines(entry.heading, margin, 28, width - 2 * margin, BHB.navy) + 4;
+  if (entry.subtitle) y += textLines(entry.subtitle, margin, 18, width - 2 * margin, BHB.muted) + 4;
+  y += 12;
   if (entry.kind === "chart") {
     const labelWidth = 380; const plotX = margin + labelWidth + 16; const plotW = width - plotX - margin - 70; const [min, max] = entry.scale;
     const scaleX = (value) => plotX + (Math.max(min, Math.min(max, value)) - min) / (max - min) * plotW;
@@ -698,8 +710,8 @@ export async function buildBundleArtifacts(XLSX, payload) {
   for (const entry of items) {
     const layout = layoutItem(entry, font); layouts.push(layout);
     const image = itemOnly(layout);
-    svg.push({ name: `SVG/${entry.id}-${entry.item.family}.svg`, content: svgItem(image, font), width: image.width, height: image.height });
-    manifest.push({ id: entry.id, title: entry.item.title, family: entry.item.family, group: entry.item.groupKey || "whole-project", groupLabel: entry.item.groupLabel || "", benchmark: entry.item.low !== undefined ? `${f2(entry.item.low)}–${f2(entry.item.high)}` : "", caption: entry.subtitle || "", deckSlide: entry.item.number, width: image.width, height: image.height, pdfPage: { width: layout.width, height: layout.height }, sourceValues: entry.sourceValues.map(String) });
+    svg.push({ name: `SVG/${entry.fileStem}.svg`, content: svgItem(image, font), width: image.width, height: image.height });
+    manifest.push({ id: entry.id, file: entry.fileStem, heading: entry.heading, title: entry.item.title, family: entry.item.family, group: entry.item.groupKey || "whole-project", groupLabel: entry.item.groupLabel || "", benchmark: entry.item.low !== undefined ? `${f2(entry.item.low)}–${f2(entry.item.high)}` : "", caption: entry.subtitle || "", deckSlide: entry.item.number, width: image.width, height: image.height, pdfPage: { width: layout.width, height: layout.height }, sourceValues: entry.sourceValues.map(String) });
   }
   const workbook = XLSX.utils.book_new();
   for (const [index, entry] of items.entries()) {

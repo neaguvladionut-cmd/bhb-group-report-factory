@@ -96,17 +96,17 @@ export const behaviorPageGroups = (rows) => pageGroups(rows, 6);
 
 const range = (low, high) => `${f2(low)}–${f2(high)}`;
 // §10a, approved standard text; the last sentence follows the annex setting.
-// F26: a sentence that explains a chart type is left out when that chart type is toggled off.
-export function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end", toggles = {}) {
-  const on = (key) => toggles[key] !== false;
+// F26/F39: each sentence appears only when a generated slide shows what it explains; with nothing generated, only
+// the generic opening and the annex sentence remain. `families` = the plan families that are generated.
+const ALL_FAMILIES = new Set(["key-findings", "range", "ranking", "benchmark", "population", "zone", "behavior", "participant-mean", "participant-comparison", "competency-participants"]);
+export function howToReadParagraphs(low = 2.75, high = 3.5, annex = "end", families = ALL_FAMILIES) {
+  const has = (...names) => names.some((name) => families.has(name));
+  const opening = "Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim.";
+  const bandText = has("range", "ranking", "zone", "participant-mean", "participant-comparison", "competency-participants") ? ` Banda gri din grafice marchează intervalul de referință (benchmark) de ${range(low, high)}, care corespunde unei performanțe la nivel mediu în evaluările TREND: rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie.` : "";
+  const second = [has("key-findings", "range", "ranking", "benchmark", "participant-mean") ? "Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme." : "", has("range") ? "Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților." : ""].filter(Boolean).join(" ");
+  const third = has("key-findings", "behavior") ? ["Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate.", has("key-findings") ? "Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat." : ""].filter(Boolean).join(" ") : "";
   const last = annex === "none" ? "Rezultatele descriu grupul evaluat." : `Rezultatele descriu grupul evaluat. Rezultatele individuale se regăsesc ${annex === "separate" ? "în anexa transmisă separat" : "în anexă"}.`;
-  const second = ["Media arată nivelul general al grupului; mediana este scorul participantului aflat la mijlocul grupului și este mai puțin influențată de rezultatele extreme.", on("range") ? "Graficele de distribuție arată, pentru fiecare competență, cel mai mic și cel mai mare scor obținut, mediana și intervalele în care se situează jumătatea superioară și cea inferioară a participanților." : ""].filter(Boolean).join(" ");
-  const keyFindings = on("keyFindings") && on("observation");
-  const third = keyFindings || on("behavior") ? ["Abilitățile cheie sunt comportamentele cel mai bine demonstrate în cadrul fiecărei competențe; abilitățile de dezvoltat sunt cele mai puțin demonstrate.", keyFindings ? "Procentele indică ponderea participanților care au demonstrat pe deplin comportamentul, respectiv care nu l-au demonstrat." : ""].filter(Boolean).join(" ") : "";
-  return [
-    `Rezultatele pe competențe sunt exprimate pe o scală de la 1 la 5, unde 1 reprezintă nivelul minim, iar 5 nivelul maxim. Banda gri din grafice marchează intervalul de referință (benchmark) de ${range(low, high)}, care corespunde unei performanțe la nivel mediu în evaluările TREND: rezultatele din bandă sunt la nivel mediu, cele de deasupra ei peste medie, iar cele de dedesubt sub medie.`,
-    second, third, last
-  ].filter(Boolean);
+  return [`${opening}${bandText}`, second, third, last].filter(Boolean);
 }
 export const HOW_TO_READ = (low = 2.75, high = 3.5, annex = "end") => howToReadParagraphs(low, high, annex).join(" ");
 
@@ -293,13 +293,15 @@ export function reportPlan(payload, { scope = "whole" } = {}) {
   const year = text(metadata.reportDate).match(/\b(\d{4})\b/u)?.[1] || String(new Date().getFullYear());
   const add = (family, data = {}) => slides.push({ family, templateIndex: TEMPLATE_SLIDES[family], title: TEMPLATE_TITLES[family] || "", groupKey: "", deliverable: "main", ...data });
   add("cover", { title: `${client} – ${program}`, client, program, year });
-  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: howToReadParagraphs(payload.bands.low, payload.bands.high, annex, toggles) });
+  add("how-to-read", { title: "CUM CITIM ACEST RAPORT", paragraphs: [] });
   add("methodology", { title: "PRIVIRE DE ANSAMBLU ASUPRA PROIECTULUI - METODOLOGIE", page: methodologyColumns(payload) });
   add("executive-summary", { title: "Executive Summary", summary: executiveSummary(payload) });
   if (toggles.keyFindings !== false && toggles.observation !== false) competencyFindings(payload).forEach((finding) => add("key-findings", { ...finding, title: `Distribuția pe competențe – ${finding.competency}`, low: payload.bands.low, high: payload.bands.high }));
   addTemplateSection(slides, payload);
   if (metadata.splitGroups && (payload.groups || []).length >= 2) payload.groups.forEach((group) => addTemplateSection(slides, viewForGroup(payload, group), group.code));
   const appendix = annex === "none" ? [] : appendixSlides(payload);
+  const generated = new Set([...slides, ...appendix].map((slide) => slide.family));
+  slides.find((slide) => slide.family === "how-to-read").paragraphs = howToReadParagraphs(payload.bands.low, payload.bands.high, appendix.length ? annex : "none", generated);
   const close = { family: "close", templateIndex: 22, title: "MULȚUMIM!", groupKey: "", deliverable: "main" };
   let selected;
   if (scope === "main") selected = [...slides, close];
