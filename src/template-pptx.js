@@ -281,6 +281,35 @@ function fillKeyFindings(xml, item) {
   const strengthsHeader = xfrmOf(getShape(xml, 19));
   return addToTree(xml, newTextShape({ id: newId(), name: "subtitle", x: strengthsHeader.x, y: titleBox.y + titleBox.cy - 0.18 * EMU + shift, cx: 10.8 * EMU, cy: 0.4 * EMU, rPr: setRPrAttr(accent, "sz", "2000"), text: `medie ${f2(item.mean)} · mediană ${f2(item.median)}`, align: "l", anchor: "ctr" }));
 }
+/**
+ * F33: „{competency}<tab>{mean}” with the mean on a right tab at the box edge. Names are broken into lines (explicit
+ * <a:br/>) that end before the mean's column, at the largest size (≤ template, ≥ 10 pt) where the list fits the box.
+ */
+function competencyMeansBox(shape, rows) {
+  const box = xfrmOf(shape); const style = templateParagraphs(shape)[0];
+  const margin = Number(style.pPr.match(/\smarL="(\d+)"/u)?.[1] || 0);
+  const lineFactor = Number(style.pPr.match(/<a:lnSpc><a:spcPct val="(\d+)"/u)?.[1] || 100000) / 100000;
+  const tabPos = box.cx - 2 * 91440 - margin - 0.05 * EMU;
+  const base = Number(style.rPrs[0].match(/\ssz="(\d+)"/u)?.[1] || 2000);
+  const wrap = (value, width, size) => { const lines = []; let line = ""; for (const word of value.split(/\s+/u)) { const next = line ? `${line} ${word}` : word; if (line && next.length * size * 0.5 > width) { lines.push(line); line = word; } else line = next; } lines.push(line); return lines; };
+  let chosen = null;
+  for (let size = base; size >= 1000; size -= 100) {
+    const points = size / 100; const allowed = tabPos / 12700 - 4 * points * 0.5 - points * 1.2;
+    const wrapped = rows.map((row) => wrap(row.competency, allowed, points));
+    const height = wrapped.reduce((sum, lines) => sum + lines.length, 0) * points * 1.2 * lineFactor * 12700 + 2 * 45720;
+    chosen = { size, wrapped };
+    if (height <= box.cy) break;
+  }
+  const rPr = setRPrAttr(style.rPrs[0], "sz", String(chosen.size));
+  const tab = `<a:tabLst><a:tab pos="${Math.round(tabPos)}" algn="r"/></a:tabLst>`;
+  let pPr = style.pPr || "<a:pPr/>"; pPr = pPr.replace(/<a:tabLst\/>|<a:tabLst>[\s\S]*?<\/a:tabLst>/u, "");
+  pPr = pPr.endsWith("/>") ? pPr.replace(/\/>$/u, `>${tab}</a:pPr>`) : (() => { const at = pPr.search(/<a:(?:defRPr|extLst)\b/u); return at >= 0 ? `${pPr.slice(0, at)}${tab}${pPr.slice(at)}` : pPr.replace(/<\/a:pPr>$/u, `${tab}</a:pPr>`); })();
+  const brRPr = rPr.replace(/^<a:rPr/u, "<a:rPr");
+  const paragraphs = rows.map((row, index) => { const lines = chosen.wrapped[index]; const body = lines.map((line, lineIndex) => lineIndex < lines.length - 1 ? `<a:r>${rPr}<a:t>${xmlEscape(line)}</a:t></a:r><a:br>${brRPr}</a:br>` : `<a:r>${rPr}<a:t>${xmlEscape(`${line}\t${f2(row.mean)}`)}</a:t></a:r>`).join(""); return `<a:p>${pPr}${body}</a:p>`; }).join("");
+  const open = shape.search(/<p:txBody>/u); const close = shape.search(/<\/p:txBody>/u); const bodyXml = shape.slice(open, close);
+  const first = bodyXml.search(/<a:p[\s>]/u);
+  return `${shape.slice(0, open)}${bodyXml.slice(0, first)}${paragraphs}${shape.slice(close)}`;
+}
 function fillBenchmark(xml, item) {
   const { low, high } = bandRange(item); const table = item.table;
   xml = titleSuffix(xml, 21, item);
@@ -288,9 +317,7 @@ function fillBenchmark(xml, item) {
   xml = placeBrace(xml, 8, 11, filled.spans.above, `${table.shares.above}%`);
   xml = placeBrace(xml, 14, 16, filled.spans.in, `${table.shares.in}%`);
   xml = placeBrace(xml, 12, 13, filled.spans.below, `${table.shares.below}%`);
-  xml = fill(xml, 4, table.competencyMeans.map((row) => `${row.competency}\t${f2(row.mean)}`));
-  // The mean sits on a right-aligned tab at the box's right edge, so long names wrap without scattering the values.
-  xml = updateShape(xml, 4, (shape) => { const box = xfrmOf(shape); return shape.replace(/<a:pPr\b([^>]*?)(\/>|>([\s\S]*?)<\/a:pPr>)/gu, (whole, attrs, close, inner = "") => { const margin = Number(attrs.match(/\smarL="(\d+)"/u)?.[1] || 0); const tab = `<a:tabLst><a:tab pos="${Math.round(box.cx - 2 * 91440 - margin - 0.05 * EMU)}" algn="r"/></a:tabLst>`; const body = (inner || "").replace(/<a:tabLst\/>|<a:tabLst>[\s\S]*?<\/a:tabLst>/u, ""); const at = body.search(/<a:(?:defRPr|extLst)\b/u); const next = at >= 0 ? `${body.slice(0, at)}${tab}${body.slice(at)}` : `${body}${tab}`; return `<a:pPr${attrs}>${next}</a:pPr>`; }); });
+  xml = updateShape(xml, 4, (shape) => competencyMeansBox(shape, table.competencyMeans));
   xml = fill(xml, 19, [`Rezultate raportate la benchmark (${f2(low)}-${f2(high)})`], { fit: false });
   return fill(xml, 17, [`${table.shares.above}% au obținut o medie generală peste ${f2(high)}`, `${table.shares.in}% au obținut o medie generală între ${f2(low)} – ${f2(high)}`, `${table.shares.below}% au obținut o medie generală mai mică de ${f2(low)}`]);
 }
@@ -345,7 +372,8 @@ function fillSlide(xml, item) {
   }
 }
 // F23: sibling text boxes on one slide share ONE size — the smallest of their fits.
-const SIBLINGS = { "how-to-read": [5, 6], methodology: [5, 6], "executive-summary": [4, 7, 11], "key-findings": [17, 18], benchmark: [4, 17], conclusions: [4, 7, 11] };
+// Groups of boxes that sit side by side in one column/row of the template (the big right-hand box of t21 is its own group).
+const SIBLINGS = { "how-to-read": [[5, 6]], methodology: [[5, 6]], "executive-summary": [[4, 7]], "key-findings": [[17, 18]], benchmark: [[4, 17]], conclusions: [[4, 7]] };
 const largestSize = (shape) => Math.max(0, ...[...shape.matchAll(/<a:rPr\b[^>]*\ssz="(\d+)"[^>]*>(?:(?!<\/a:r>)[\s\S])*?<a:t>[^<]/gu)].map((match) => Number(match[1])));
 function equaliseSiblings(xml, ids) {
   const sizes = ids.map((id) => largestSize(getShape(xml, id))).filter(Boolean);
@@ -355,7 +383,7 @@ function equaliseSiblings(xml, ids) {
 }
 export function renderSlide(item, sourceXml) {
   let xml = fillSlide(sourceXml, item);
-  if (SIBLINGS[item.family]) xml = equaliseSiblings(xml, SIBLINGS[item.family]);
+  for (const group of SIBLINGS[item.family] || []) xml = equaliseSiblings(xml, group);
   xml = applyBand(xml, chartSpec(item), item);
   return xml;
 }

@@ -336,3 +336,34 @@ test("F27: PNG/SVG items carry no caption; F29: app.xml counts the generated sli
   const on = reportPlan(payloadOf(acceptance)).find((item) => item.family === "how-to-read").paragraphs.join(" ");
   assert.match(on, /Graficele de distribuție/u); assert.match(on, /Procentele indică/u);
 });
+
+const { createFixture: insp5Fixture } = await import("./fixtures/grf-r-insp5-fixture.mjs");
+const insp5 = insp5Fixture(XLSX);
+const longLines = (count, prefix) => Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}: text de test al consultantului, formulat suficient de lung pentru a verifica încadrarea în casetă la dimensiunea șablonului`).join("\n");
+const filledDeck = await deck(payloadOf(insp5, { splitGroups: true, conclusionsStrengths: longLines(4, "Punct forte"), conclusionsDevelopment: longLines(4, "Arie"), conclusionsInterventions: longLines(6, "Intervenție"), groupConclusions: { MGR: { strengths: "Grup MGR: punct forte specific", interventions: "Grup MGR: intervenție" } } }));
+
+test("F31/F23 ruling: text fills at the largest size that fits (template size when it fits); F32 per-group conclusions", () => {
+  const size = (shape) => Math.max(0, ...[...shape.matchAll(/<a:rPr\b[^>]*\ssz="(\d+)"[^>]*>(?:(?!<\/a:r>)[\s\S])*?<a:t>[^<]/gu)].map((match) => Number(match[1])));
+  const whole = filledDeck.plan.findIndex((item) => item.family === "conclusions" && !item.groupKey);
+  assert.equal(size(getShape(filledDeck.slides[whole], 11)), 2000, "the interventions box keeps the template's 20 pt when its text fits");
+  assert(size(getShape(filledDeck.slides[whole], 4)) >= 1000);
+  const mgr = filledDeck.plan.findIndex((item) => item.family === "conclusions" && item.groupKey === "MGR");
+  assert.equal(text(getShape(filledDeck.slides[mgr], 11)), "Grup MGR: intervenție");
+  assert.equal(text(getShape(filledDeck.slides[mgr], 4)), "Grup MGR: punct forte specific");
+  const spc = filledDeck.plan.findIndex((item) => item.family === "conclusions" && item.groupKey === "SPC");
+  assert.equal(text(getShape(filledDeck.slides[spc], 11)), "", "a group without its own fields stays blank, never the whole-project text");
+});
+
+test("F33: on t7 the longest competency line ends before the mean's right tab", () => {
+  for (const [index, item] of filledDeck.plan.entries()) {
+    if (item.family !== "benchmark") continue;
+    const shape = getShape(filledDeck.slides[index], 4);
+    const tab = Number(shape.match(/<a:tab pos="(\d+)" algn="r"\/>/u)[1]);
+    for (const paragraph of shape.match(/<a:p>[\s\S]*?<\/a:p>/gu)) {
+      const last = [...paragraph.matchAll(/<a:t>([^<]*)<\/a:t>/gu)].at(-1)[1]; const sizePt = Number(paragraph.match(/sz="(\d+)"/u)[1]) / 100;
+      const [name, mean] = decode(last).split("\t");
+      assert.match(mean, /^\d\.\d\d$/u);
+      assert(name.length * sizePt * 0.5 * 12700 + (mean.length + 1) * sizePt * 0.5 * 12700 <= tab, `„${name}” runs into its mean`);
+    }
+  }
+});

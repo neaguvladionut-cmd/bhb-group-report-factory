@@ -248,7 +248,9 @@ function addTemplateSection(slides, view, groupKey = "") {
   }
   if (on("conclusions")) {
     add("divider-conclusions");
-    add("conclusions", { strengths: text(view.metadata.conclusionsStrengths), development: text(view.metadata.conclusionsDevelopment), interventions: text(view.metadata.conclusionsInterventions) });
+    // F32: a group's conclusions slide uses that group's own fields; the whole project uses the project fields.
+    const own = groupKey ? view.metadata.groupConclusions?.[groupKey] || {} : { strengths: view.metadata.conclusionsStrengths, development: view.metadata.conclusionsDevelopment, interventions: view.metadata.conclusionsInterventions };
+    add("conclusions", { strengths: text(own.strengths), development: text(own.development), interventions: text(own.interventions) });
   }
 }
 

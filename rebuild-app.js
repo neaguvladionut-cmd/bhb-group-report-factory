@@ -12,7 +12,9 @@ const text = (value) => String(value ?? "").trim();
 function metadata() {
   const groupNames = Object.fromEntries($$(`[data-group-name]`).map((input) => [input.dataset.groupName, input.value]));
   const slideToggles = Object.fromEntries($$(`[data-slide-toggle]`).map((input) => [input.dataset.slideToggle, input.checked]));
-  return { projectName: $("#project-name")?.value || "", clientName: $("#client-name")?.value || "", reportDate: $("#report-date")?.value || "", context: $("#report-context")?.value || "", exercises: $("#exercise-list")?.value || "", otherInstruments: $("#other-instruments")?.value || "", conclusions: $("#conclusions")?.value || "", executiveConclusions: $("#conclusions")?.value || "", program: $("#program")?.value || "", methodologyText: $("#methodology-text")?.value ?? "", evaluators: $("#evaluators")?.value || "", days: $("#days")?.value || "", exerciseCount: $("#exercise-count")?.value || "", conclusionsStrengths: $("#conclusions-strengths")?.value || "", conclusionsDevelopment: $("#conclusions-development")?.value || "", conclusionsInterventions: $("#conclusions-interventions")?.value || "", benchmarkLow: $("#benchmark-low")?.value ?? "2.75", benchmarkHigh: $("#benchmark-high")?.value ?? "3.5", annex: $("#annex-setting")?.value || "end", splitGroups: Boolean($("#split-groups")?.checked), groupNames, slideToggles };
+  const groupConclusions = {};
+  $$(`[data-group-conclusion]`).forEach((input) => { (groupConclusions[input.dataset.groupConclusion] ||= {})[input.dataset.field] = input.value; });
+  return { projectName: $("#project-name")?.value || "", clientName: $("#client-name")?.value || "", reportDate: $("#report-date")?.value || "", context: $("#report-context")?.value || "", exercises: $("#exercise-list")?.value || "", otherInstruments: $("#other-instruments")?.value || "", conclusions: $("#conclusions")?.value || "", executiveConclusions: $("#conclusions")?.value || "", program: $("#program")?.value || "", methodologyText: $("#methodology-text")?.value ?? "", evaluators: $("#evaluators")?.value || "", days: $("#days")?.value || "", exerciseCount: $("#exercise-count")?.value || "", conclusionsStrengths: $("#conclusions-strengths")?.value || "", conclusionsDevelopment: $("#conclusions-development")?.value || "", conclusionsInterventions: $("#conclusions-interventions")?.value || "", benchmarkLow: $("#benchmark-low")?.value ?? "2.75", benchmarkHigh: $("#benchmark-high")?.value ?? "3.5", annex: $("#annex-setting")?.value || "end", splitGroups: Boolean($("#split-groups")?.checked), groupNames, groupConclusions, slideToggles };
 }
 
 function download(blob, name) {
@@ -80,6 +82,14 @@ function renderStructure() {
     groupSection.innerHTML = `<strong>Nume afișat pentru grupuri</strong><small>Valorile CODE sunt implicite și pot fi schimbate fără a schimba datele.</small>`;
     payload.groups.forEach((group) => { const label = document.createElement("label"); label.textContent = group.code; const input = document.createElement("input"); input.dataset.groupName = group.code; input.value = payload.metadata.groupNames?.[group.code] || group.code; input.addEventListener("input", invalidate); label.append(input); groupSection.append(label); });
     root.append(groupSection);
+    if (payload.metadata.splitGroups) {
+      const fields = [["strengths", "Abilități cheie"], ["development", "Arii de dezvoltare"], ["interventions", "Posibile intervenții"]];
+      const conclusions = document.createElement("section");
+      conclusions.className = "structure-card group-settings";
+      conclusions.innerHTML = `<strong>Concluzii și recomandări pe grupuri</strong><small>Fiecare grup are propriul slide de concluzii; câmpurile goale rămân de completat în PowerPoint.</small>`;
+      payload.groups.forEach((group) => fields.forEach(([field, title]) => { const label = document.createElement("label"); label.textContent = `${payload.metadata.groupNames?.[group.code] || group.code} – ${title}`; const area = document.createElement("textarea"); area.rows = 3; area.dataset.groupConclusion = group.code; area.dataset.field = field; area.value = payload.metadata.groupConclusions?.[group.code]?.[field] || ""; area.addEventListener("change", invalidate); label.append(area); conclusions.append(label); }));
+      root.append(conclusions);
+    }
   }
 }
 
