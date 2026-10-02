@@ -9,8 +9,5 @@
     "test:required": "node --test $(ls tests/*.test.mjs | grep -v /pptx.test.mjs)",
     "test:pptx": "node --test tests/pptx.test.mjs",
     "check:root": "node tools/check-root.mjs"
-  },
-  "devDependencies": {
-    "jsdom": "^30.1.1"
   }
 }
