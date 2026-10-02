@@ -11,7 +11,7 @@ if (!window.XLSX || !window.JSZip) throw new Error("Lipsesc bibliotecile locale 
 let files = [];
 let payload = null;
 let activeDownloadUrl = "";
-const state = { step: 1, acknowledged: new Set(), corrections: { values: {} }, busy: false, receipts: [], projectName: "", reportDate: "", previewOpen: false };
+const state = { step: 1, acknowledged: new Set(), corrections: { values: {} }, methodologyProposals: {}, completedSteps: new Set(), busy: false, receipts: [], projectName: "", reportDate: "", previewOpen: false };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const text = (value) => String(value ?? "").trim();
@@ -26,7 +26,7 @@ function metadata() {
   const groupConclusions = {};
   $$(`[data-group-conclusion]`).forEach((input) => { (groupConclusions[input.dataset.groupConclusion] ||= {})[input.dataset.field] = input.value; });
   const slideToggles = Object.fromEntries($$(`[data-slide-toggle]`).map((input) => [input.dataset.slideToggle, input.checked]));
-  const value = (...ids) => ids.map((id) => $(`#${id}`)?.value).find((item) => text(item)) || "";
+  const value = (proposalKey, ...ids) => Object.hasOwn(state.methodologyProposals, proposalKey) ? state.methodologyProposals[proposalKey] : ids.map((id) => $(`#${id}`)?.value).find((item) => text(item)) || "";
   return {
     projectName: $("#project-name")?.value || state.projectName,
     clientName: $("#client-name")?.value || "",
@@ -41,12 +41,12 @@ function metadata() {
     conclusionsDevelopment: $("#conclusions-development")?.value || "",
     conclusionsInterventions: $("#conclusions-interventions")?.value || "",
     methodologyText: $("#methodology-text")?.value ?? "",
-    evaluators: value("proposal-evaluators", "evaluators"),
-    days: value("proposal-days", "days"),
-    teamSize: value("proposal-team-size", "team-size"),
-    evaluationPeriod: value("proposal-period", "evaluation-period"),
-    populationByRole: value("proposal-population", "population-role"),
-    location: value("proposal-location", "location"),
+    evaluators: value("evaluators", "proposal-evaluators", "evaluators"),
+    days: value("days", "proposal-days", "days"),
+    teamSize: value("teamSize", "proposal-team-size", "team-size"),
+    evaluationPeriod: value("evaluationPeriod", "proposal-period", "evaluation-period"),
+    populationByRole: value("populationByRole", "proposal-population", "population-role"),
+    location: value("location", "proposal-location", "location"),
     benchmarkLow: $("#benchmark-low")?.value ?? "2.75",
     benchmarkHigh: $("#benchmark-high")?.value ?? "3.5",
     annex: document.querySelector(`input[name="annex"]:checked`)?.value || "end",
@@ -76,7 +76,8 @@ function deriveProjectName() {
 function friendlyKind(kind) { return { "ac-summary-1-5": "Export de sinteză", "ac-detailed-0-2": "Export detaliat", "devplan-descriptors": "Declinații", unsupported: "Fișier nerecunoscut" }[kind] || "Fișier"; }
 function sourceDates() { return payload?.methodology?.dates || []; }
 function periodLabel() { const dates = sourceDates(); if (!dates.length) return "Nu apare în export"; if (dates.length === 1) return dates[0]; return `${dates[0]} – ${dates.at(-1)}`; }
-function addFieldListeners() { $$(`[data-derived-field]`).forEach((input) => { if (input.dataset.listenerAttached) return; input.dataset.listenerAttached = "true"; input.addEventListener("input", () => { input.dataset.userEdited = "true"; }); input.addEventListener("change", recompute); }); }
+function setProposal(input) { const key = input?.dataset.proposalKey; if (key) state.methodologyProposals[key] = input.value; }
+function addFieldListeners() { $$(`[data-derived-field]`).forEach((input) => { if (input.dataset.listenerAttached) return; input.dataset.listenerAttached = "true"; input.addEventListener("input", () => { setProposal(input); recompute(); }); input.addEventListener("change", () => { setProposal(input); recompute(); }); }); }
 function renderFileCards() {
   const schemas = payload?.schemas || [];
   const matched = new Map(schemas.map((schema) => [schema.kind, schema]));
@@ -107,23 +108,44 @@ function renderFound() {
   if (statsNode) statsNode.innerHTML = stats.map(([value, label]) => `<div class="stat"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join("");
   const factsNode = $("#source-facts");
   if (factsNode) factsNode.innerHTML = (payload.schemas || []).map((schema) => `<div class="source-fact"><strong>${esc(friendlyKind(schema.kind))}</strong><span>${esc(schema.sourceName)} · ${Math.max(0, schema.rows.length - schema.headerRow)} rânduri</span></div>`).join("");
+  const defaults = {
+    evaluators: (method.evaluatorNames || []).join(", "),
+    teamSize: method.commonTeamSize || "",
+    days: method.dates?.length || "",
+    evaluationPeriod: periodLabel() === "Nu apare în export" ? "" : periodLabel(),
+    populationByRole: population,
+    location: (method.locations || []).join(", ")
+  };
+  Object.entries(defaults).forEach(([key, value]) => { if (!Object.hasOwn(state.methodologyProposals, key)) state.methodologyProposals[key] = String(value); });
   const values = metadata();
+  const examples = {
+    "project-name": "Proiect Delta",
+    "client-name": "Compania Delta",
+    "report-date": today(),
+    program: "Centru de Dezvoltare",
+    "proposal-evaluators": "Ana Popescu, Mihai Ionescu",
+    "proposal-team-size": "3 consultanți",
+    "proposal-days": "2",
+    "proposal-period": "01.10.2026 – 02.10.2026",
+    "proposal-population": "20 participanți (12 manageri, 8 specialiști)",
+    "proposal-location": "București"
+  };
   const fields = [
     ["project-name", "Nume proiect", "Numele proiectului apare pe copertă.", values.projectName || state.projectName, "Apare în: copertă și numele fișierelor.", "din numele fișierului", "text"],
     ["client-name", "Client", "Numele clientului rămâne în metodologia raportului și în numele fișierelor.", values.clientName, "Apare în: metodologia raportului și numele fișierelor.", "de confirmat de consultant", "text"],
     ["report-date", "Data raportului", "Data propusă pentru livrare.", values.reportDate || today(), "Apare în: copertă și chitanță.", "propunere", "text"],
     ["program", "Program", "Denumirea programului din livrare.", values.program || "Centru de Dezvoltare", "Apare în: copertă și metodologia raportului.", "standard Trend", "text"],
-    ["proposal-evaluators", "Evaluatori", "Numele distincte găsite în exporturile detaliate.", (method.evaluatorNames || []).join(", "), "Apare în: metodologia raportului.", proposalChip(method.evaluatorNames?.length), "text"],
-    ["proposal-team-size", "Echipa unui participant", "Cea mai frecventă echipă de evaluatori pentru un participant.", method.commonTeamSize || "", "Apare în: metodologia raportului.", proposalChip(method.commonTeamSize), "text"],
-    ["proposal-days", "Zile de evaluare", "Numărul de date distincte din coloana date.", method.dates?.length || "", "Apare în: metodologia raportului.", proposalChip(method.dates?.length), "text"],
-    ["proposal-period", "Perioada evaluării", "Prima și ultima dată găsite în coloana date.", periodLabel() === "Nu apare în export" ? "" : periodLabel(), "Apare în: metodologia raportului.", proposalChip(method.dates?.length), "text"],
-    ["proposal-population", "Participanți și roluri", "Rolurile sunt propuse din coloana Job.", population, "Apare în: metodologia raportului.", proposalChip(roles.length), "text"],
-    ["proposal-location", "Locația evaluării", "Locația este propusă din certification location.", (method.locations || []).join(", "), "Apare în: metodologia raportului.", proposalChip(method.locations?.length), "text"]
+    ["proposal-evaluators", "Evaluatori", "Numele distincte găsite în exporturile proiectului.", values.evaluators, "Apare în: metodologia raportului.", proposalChip(method.evaluatorNames?.length), "text", "evaluators"],
+    ["proposal-team-size", "Echipa unui participant", "Cea mai frecventă echipă de evaluatori pentru un participant.", values.teamSize, "Apare în: metodologia raportului.", proposalChip(method.commonTeamSize), "text", "teamSize"],
+    ["proposal-days", "Zile de evaluare", "Numărul de date distincte găsite în export.", values.days, "Apare în: metodologia raportului.", proposalChip(method.dates?.length), "text", "days"],
+    ["proposal-period", "Perioada evaluării", "Prima și ultima dată găsite în export.", values.evaluationPeriod, "Apare în: metodologia raportului.", proposalChip(method.dates?.length), "text", "evaluationPeriod"],
+    ["proposal-population", "Participanți și roluri", "Rolurile sunt propuse din informațiile despre rol din export.", values.populationByRole, "Apare în: metodologia raportului.", proposalChip(roles.length), "text", "populationByRole"],
+    ["proposal-location", "Locația evaluării", "Locația este propusă din informațiile despre locația evaluării din export.", values.location, "Apare în: metodologia raportului.", proposalChip(method.locations?.length), "text", "location"]
   ];
   const derived = $("#derived-fields");
-  if (derived) derived.innerHTML = fields.map(([id, label, help, value, where, source, type]) => `<div class="derived-field"><label for="${id}">${esc(label)}</label><p class="field-help">${esc(help)} Exemplu: ${esc(id === "report-date" ? today() : id === "program" ? "Centru de Dezvoltare" : id === "client-name" ? "Client sintetic" : id === "proposal-team-size" ? "3" : id === "proposal-days" ? "2" : "Proiect sintetic")}.</p><input id="${id}" data-derived-field="true" type="${type}" value="${esc(value)}" placeholder="${id === "client-name" ? "Exemplu: Client sintetic" : "Completează dacă este necesar"}">${source ? `<span class="source-chip">${esc(source)}</span>` : ""}<span class="field-where">${esc(where)}</span></div>`).join("");
+  if (derived) derived.innerHTML = fields.map(([id, label, help, value, where, source, type, proposalKey]) => { const helpId = `${id}-help`; const exampleId = `${id}-example`; const whereId = `${id}-where`; return `<div class="derived-field"><label for="${id}">${esc(label)}</label><p id="${helpId}" class="field-help">${esc(help)}</p><p id="${exampleId}" class="field-help">Exemplu: ${esc(examples[id])}.</p><input id="${id}" data-derived-field="true" data-proposal-key="${esc(proposalKey || "")}" type="${type}" value="${esc(value)}" placeholder="${esc(examples[id])}" aria-describedby="${helpId} ${exampleId} ${whereId}">${source ? `<span class="source-chip">${esc(source)}</span>` : ""}<span id="${whereId}" class="field-where">${esc(where)}</span></div>`; }).join("");
   addFieldListeners();
-  [["evaluators", (method.evaluatorNames || []).join(", ")], ["days", method.dates?.length || ""], ["team-size", method.commonTeamSize || ""], ["evaluation-period", periodLabel() === "Nu apare în export" ? "" : periodLabel()], ["population-role", population], ["location", (method.locations || []).join(", ")]].forEach(([id, value]) => { const input = $(`#${id}`); if (input && !input.dataset.userEdited) input.value = value; });
+  [["evaluators", "evaluators"], ["days", "days"], ["team-size", "teamSize"], ["evaluation-period", "evaluationPeriod"], ["population-role", "populationByRole"], ["location", "location"]].forEach(([id, key]) => { const input = $(`#${id}`); if (input) input.value = state.methodologyProposals[key] ?? ""; });
 }
 
 function renderReview() {
@@ -172,6 +194,8 @@ function sync() {
   $$(`[data-section]`).forEach((section) => { const number = Number(section.dataset.section); const unlocked = number <= allowed; section.classList.toggle("is-locked", !unlocked); section.classList.toggle("is-unlocked", unlocked && number > 1); section.classList.toggle("is-current", number === state.step); section.setAttribute("aria-disabled", String(!unlocked)); const body = section.querySelector(`[data-body="${number}"]`); if (body) body.hidden = !unlocked; });
   $$(`[data-section]`).forEach((section) => { section.hidden = Number(section.dataset.section) !== state.step; });
   $$(`#workflow-steps [data-step]`).forEach((link) => { const number = Number(link.dataset.step); const unlocked = number <= allowed; link.classList.toggle("active", number === state.step); link.classList.toggle("done", number < state.step); link.classList.toggle("locked", !unlocked); link.setAttribute("aria-disabled", String(!unlocked)); link.setAttribute("aria-current", number === state.step ? "step" : "false"); });
+  const lockReasons = { 2: "Încarcă mai întâi exporturile pentru a debloca verificarea.", 3: "Confirmă datele și avertismentele pentru a debloca alegerile.", 4: "Alege structura raportului pentru a debloca descărcările." };
+  $$("[data-step]").forEach((link) => { const number = Number(link.dataset.step); const unlocked = number <= allowed; link.classList.toggle("done", state.completedSteps.has(number)); if (!unlocked) { link.setAttribute("title", lockReasons[number]); link.setAttribute("aria-label", (link.querySelector("strong")?.textContent || "Pas") + ". " + lockReasons[number]); } else { link.removeAttribute("title"); link.removeAttribute("aria-label"); } });
   $("#to-step-2") && ($("#to-step-2").disabled = !ready(1));
   $("#to-step-3") && ($("#to-step-3").disabled = !ready(2));
   $("#to-step-4") && ($("#to-step-4").disabled = !ready(3));
@@ -184,15 +208,18 @@ function renderDownload() { const time = $("#receipt-time"); const receipt = $("
 function addReceipt(name, kind, detail) { const time = new Intl.DateTimeFormat("ro-RO", { dateStyle: "short", timeStyle: "short" }).format(new Date()); const normalizedDetail = detail.replace(/(\d+) slide-uri?/u, (_, count) => `${count} ${count === "1" ? "slide" : "slide-uri"}`); state.receipts.push({ name, kind, detail: normalizedDetail, time }); renderDownload(); announce(`${name} a fost pregătit pentru descărcare.`); }
 
 function render() {
+  const active = document.activeElement;
+  const focus = active?.id ? { id: active.id, start: typeof active.selectionStart === "number" ? active.selectionStart : null, end: typeof active.selectionEnd === "number" ? active.selectionEnd : null } : null;
   const current = metadata(); if (files.length && !state.projectName) state.projectName = current.projectName || deriveProjectName(); if (!state.reportDate) state.reportDate = current.reportDate || today();
   payload = buildPayload(window.XLSX, files, metadata(), state.corrections, { acknowledgedWarningIds: [...state.acknowledged] });
   Object.assign(payload.metadata, metadata());
   const warningIds = new Set(payload.warnings.map(warningKey)); state.acknowledged = new Set([...state.acknowledged].filter((id) => warningIds.has(id))); payload.warnings = payload.warnings.map((item) => ({ ...item, reviewed: state.acknowledged.has(warningKey(item)) })); payload.warningReviews = payload.warnings; payload.readiness = payload.blockers.length === 0 && payload.warnings.every((item) => item.reviewed);
-  renderFileCards(); renderFound(); renderReview(); renderStructure(); renderDownload(); sync();
+  renderFileCards(); renderFound(); Object.assign(payload.metadata, metadata()); renderReview(); renderStructure(); renderDownload(); sync();
+  if (focus) { const target = document.getElementById(focus.id); if (target) { target.focus({ preventScroll: true }); if (focus.start !== null && typeof target.setSelectionRange === "function") target.setSelectionRange(focus.start, focus.end); } }
 }
 function recompute() { render(); }
 
-async function readSources(event) { const incoming = await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() }))); files = mergeSelectedFiles(files, incoming); state.acknowledged.clear(); state.corrections = { values: {} }; state.projectName = state.projectName || deriveProjectName(); state.reportDate = state.reportDate || today(); state.step = 1; event.target.value = ""; render(); announce("Fișierele au fost citite. Verifică ce am găsit și apoi mergi la verificare."); $("#found-title")?.focus(); }
+async function readSources(event) { const incoming = await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() }))); files = mergeSelectedFiles(files, incoming); state.acknowledged.clear(); state.corrections = { values: {} }; state.methodologyProposals = {}; state.completedSteps.clear(); state.projectName = state.projectName || deriveProjectName(); state.reportDate = state.reportDate || today(); state.step = 1; event.target.value = ""; render(); announce("Fișierele au fost citite. Verifică ce am găsit și apoi mergi la verificare."); $("#found-title")?.focus(); }
 function activateStep(number) { const allowed = ready(3) ? 4 : ready(2) ? 3 : ready(1) ? 2 : 1; if (number > allowed) return; state.step = number; sync(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]} h2`)?.focus(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]}`)?.scrollIntoView({ block: "start" }); }
 
 function expectedNames(kind) { const name = slug(payload?.metadata?.projectName); return { whole: `raport-trend-${name}.pptx`, main: `raport-trend-principal-${name}.pptx`, appendix: `raport-trend-anexa-${name}.pptx`, bundle: `pachet-bhb-${name}.zip`, xlsx: `audit-raport-grup-${name}.xlsx`, "csv-template": `sablon-declinatii-${name}.csv` }; }
@@ -207,7 +234,7 @@ async function createDownload(kind) {
 }
 
 function resetSession() {
-  files = []; payload = null; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; state.projectName = ""; state.reportDate = ""; state.receipts = []; state.previewOpen = false;
+  files = []; payload = null; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; state.methodologyProposals = {}; state.completedSteps.clear(); state.projectName = ""; state.reportDate = ""; state.receipts = []; state.previewOpen = false;
   $("#sources").value = ""; $("#reset-confirm").hidden = true; $("#download-fallback").hidden = true; $("#preview") && ($("#preview").innerHTML = "");
   ["benchmark-low", "benchmark-high"].forEach((id, index) => { const input = $(`#${id}`); if (input) input.value = index ? "3.5" : "2.75"; });
   $$(`input[name="annex"]`).forEach((input) => { input.checked = input.value === "end"; }); $("#split-groups") && ($("#split-groups").checked = false);
@@ -220,13 +247,13 @@ $("#choose-files")?.addEventListener("click", () => $("#sources")?.click());
 $("#drop-zone")?.addEventListener("dragover", (event) => { event.preventDefault(); $("#drop-zone").classList.add("is-dragging"); });
 $("#drop-zone")?.addEventListener("dragleave", () => $("#drop-zone").classList.remove("is-dragging"));
 $("#drop-zone")?.addEventListener("drop", (event) => { event.preventDefault(); $("#drop-zone").classList.remove("is-dragging"); const input = $("#sources"); const transfer = event.dataTransfer; if (input && transfer?.files?.length) { const dt = new DataTransfer(); [...transfer.files].forEach((file) => dt.items.add(file)); input.files = dt.files; input.dispatchEvent(new Event("change", { bubbles: true })); } });
-$("#to-step-2")?.addEventListener("click", () => activateStep(2)); $("#to-step-3")?.addEventListener("click", () => activateStep(3)); $("#to-step-4")?.addEventListener("click", () => activateStep(4));
+$("#to-step-2")?.addEventListener("click", () => { state.completedSteps.add(1); activateStep(2); }); $("#to-step-3")?.addEventListener("click", () => { state.completedSteps.add(2); activateStep(3); }); $("#to-step-4")?.addEventListener("click", () => { state.completedSteps.add(3); activateStep(4); });
 $$(`[data-back-step]`).forEach((button) => button.addEventListener("click", () => activateStep(Number(button.dataset.backStep))));
 $("#confirm-all")?.addEventListener("click", () => { payload.warnings.forEach((item) => state.acknowledged.add(warningKey(item))); announce("Toate avertismentele au fost confirmate."); render(); $("#review-title")?.focus(); });
 $$(`#workflow-steps [data-step]`).forEach((link) => link.addEventListener("click", (event) => { event.preventDefault(); activateStep(Number(link.dataset.step)); }));
 $$(`[data-section]`).forEach((section) => section.addEventListener("click", (event) => { const anchor = event.target.closest("a[data-step]"); if (anchor) { event.preventDefault(); activateStep(Number(anchor.dataset.step)); } }));
 $("#split-groups")?.addEventListener("change", recompute); $("#benchmark-low")?.addEventListener("change", recompute); $("#benchmark-high")?.addEventListener("change", recompute); $$(`input[name="annex"]`).forEach((input) => input.addEventListener("change", () => { $$(`.option`).forEach((option) => option.classList.toggle("selected", option.querySelector("input")?.checked)); recompute(); }));
-$("#methodology-text")?.addEventListener("change", recompute); ["evaluators", "days", "team-size", "evaluation-period", "population-role", "location"].forEach((id) => { const input = $(`#${id}`); input?.addEventListener("input", () => { input.dataset.userEdited = "true"; }); input?.addEventListener("change", recompute); }); $("#conclusions")?.addEventListener("change", recompute); $("#conclusions-destination")?.addEventListener("change", recompute);
+$("#methodology-text")?.addEventListener("change", recompute); ["evaluators", "days", "team-size", "evaluation-period", "population-role", "location"].forEach((id) => { const input = $(`#${id}`); input?.addEventListener("input", () => { setProposal(input); recompute(); }); input?.addEventListener("change", () => { setProposal(input); recompute(); }); }); $("#conclusions")?.addEventListener("change", recompute); $("#conclusions-destination")?.addEventListener("change", recompute);
 $("#preview-trigger")?.addEventListener("click", () => { state.previewOpen = !state.previewOpen; const root = $("#preview"); if (!root) return; root.hidden = !state.previewOpen; $("#preview-trigger").textContent = state.previewOpen ? "Ascunde structura slide-urilor" : "Vezi structura slide-urilor"; if (state.previewOpen && payload?.readiness) { mountPreview(root, payload, { scope: "whole" }); root.querySelector(".preview-stage")?.focus(); } });
 [["#xlsx", "xlsx"], ["#csv-template", "csv-template"], ["#csv-template-import", "csv-template"], ["#bundle", "bundle"], ["#pptx-whole", "whole"], ["#pptx-main", "main"], ["#pptx-appendix", "appendix"]].forEach(([selector, kind]) => $(selector)?.addEventListener("click", () => createDownload(kind)));
 $("#reset")?.addEventListener("click", () => { $("#reset-confirm").hidden = false; $("#reset-confirm-yes")?.focus(); }); $("#reset-confirm-yes")?.addEventListener("click", resetSession); $("#reset-cancel")?.addEventListener("click", () => { $("#reset-confirm").hidden = true; $("#reset")?.focus(); });
