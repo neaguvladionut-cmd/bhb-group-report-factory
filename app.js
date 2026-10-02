@@ -2249,7 +2249,7 @@ if (!window.XLSX || !window.JSZip) throw new Error("Lipsesc bibliotecile locale 
 let files = [];
 let payload = null;
 let activeDownloadUrl = "";
-const state = { step: 1, acknowledged: new Set(), corrections: { values: {} }, methodologyProposals: {}, completedSteps: new Set(), busy: false, receipts: [], projectName: "", reportDate: "", previewOpen: false };
+const state = { step: 1, acknowledged: new Set(), corrections: { values: {} }, methodologyProposals: {}, methodologyProposalEdits: new Set(), completedSteps: new Set(), busy: false, receipts: [], projectName: "", reportDate: "", previewOpen: false };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const text = (value) => String(value ?? "").trim();
@@ -2314,7 +2314,7 @@ function deriveProjectName() {
 function friendlyKind(kind) { return { "ac-summary-1-5": "Export de sinteză", "ac-detailed-0-2": "Export detaliat", "devplan-descriptors": "Declinații", unsupported: "Fișier nerecunoscut" }[kind] || "Fișier"; }
 function sourceDates() { return payload?.methodology?.dates || []; }
 function periodLabel() { const dates = sourceDates(); if (!dates.length) return "Nu apare în export"; if (dates.length === 1) return dates[0]; return `${dates[0]} – ${dates.at(-1)}`; }
-function setProposal(input) { const key = input?.dataset.proposalKey; if (key) state.methodologyProposals[key] = input.value; }
+function setProposal(input) { const key = input?.dataset.proposalKey; if (key) { state.methodologyProposals[key] = input.value; state.methodologyProposalEdits.add(key); } }
 function addFieldListeners() { $$(`[data-derived-field]`).forEach((input) => { if (input.dataset.listenerAttached) return; input.dataset.listenerAttached = "true"; input.addEventListener("input", () => { setProposal(input); recompute(); }); input.addEventListener("change", () => { setProposal(input); recompute(); }); }); }
 function renderFileCards() {
   const schemas = payload?.schemas || [];
@@ -2355,7 +2355,7 @@ function renderFound() {
     populationByRole: population,
     location: (method.locations || []).join(", ")
   };
-  Object.entries(defaults).forEach(([key, value]) => { if (!Object.hasOwn(state.methodologyProposals, key)) state.methodologyProposals[key] = String(value); });
+  Object.entries(defaults).forEach(([key, value]) => { if (!state.methodologyProposalEdits.has(key)) state.methodologyProposals[key] = String(value); });
   const values = metadata();
   const examples = {
     "project-name": "Proiect Delta",
@@ -2459,7 +2459,7 @@ function render() {
 }
 function recompute() { render(); }
 
-async function readSources(event) { const incoming = await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() }))); files = mergeSelectedFiles(files, incoming); state.acknowledged.clear(); state.corrections = { values: {} }; state.methodologyProposals = {}; state.completedSteps.clear(); state.projectName = state.projectName || deriveProjectName(); state.reportDate = state.reportDate || today(); state.step = 1; event.target.value = ""; render(); announce("Fișierele au fost citite. Verifică ce am găsit și apoi mergi la verificare."); $("#found-title")?.focus(); }
+async function readSources(event) { const incoming = await Promise.all([...event.target.files].map(async (file) => ({ name: file.name, bytes: await file.arrayBuffer() }))); files = mergeSelectedFiles(files, incoming); state.completedSteps.clear(); state.projectName = state.projectName || deriveProjectName(); state.reportDate = state.reportDate || today(); state.step = 1; event.target.value = ""; render(); announce("Fișierele au fost citite. Verifică ce am găsit și apoi mergi la verificare."); $("#found-title")?.focus(); }
 function activateStep(number) { const allowed = ready(3) ? 4 : ready(2) ? 3 : ready(1) ? 2 : 1; if (number > allowed) return; state.step = number; sync(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]} h2`)?.focus(); document.querySelector(`#step-${["upload", "review", "choose", "download"][number - 1]}`)?.scrollIntoView({ block: "start" }); }
 
 function expectedNames(kind) { const name = slug(payload?.metadata?.projectName); return { whole: `raport-trend-${name}.pptx`, main: `raport-trend-principal-${name}.pptx`, appendix: `raport-trend-anexa-${name}.pptx`, bundle: `pachet-bhb-${name}.zip`, xlsx: `audit-raport-grup-${name}.xlsx`, "csv-template": `sablon-declinatii-${name}.csv` }; }
@@ -2497,7 +2497,7 @@ function refreshDeliveryCounts() {
 }
 
 function resetSession() {
-  files = []; payload = null; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; state.methodologyProposals = {}; state.completedSteps.clear(); state.projectName = ""; state.reportDate = ""; state.receipts = []; state.previewOpen = false;
+  files = []; payload = null; state.step = 1; state.acknowledged.clear(); state.corrections = { values: {} }; state.methodologyProposals = {}; state.methodologyProposalEdits.clear(); state.completedSteps.clear(); state.projectName = ""; state.reportDate = ""; state.receipts = []; state.previewOpen = false;
   $("#sources").value = ""; $("#reset-confirm").hidden = true; $("#download-fallback").hidden = true; $("#preview") && ($("#preview").innerHTML = "");
   ["benchmark-low", "benchmark-high"].forEach((id, index) => { const input = $(`#${id}`); if (input) input.value = index ? "3.5" : "2.75"; });
   $$(`input[name="annex"]`).forEach((input) => { input.checked = input.value === "end"; }); $("#split-groups") && ($("#split-groups").checked = false);
